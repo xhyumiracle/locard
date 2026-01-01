@@ -1,36 +1,49 @@
-"""Blockchain data tools for BlockchainMAS"""
+"""Blockchain data tools for BlockchainMAS
 
-from src.tools.blockcypher import (
-    get_btc_transaction,
-    get_doge_transaction,
-    get_btc_address_info,
-    get_doge_address_info,
-)
+Naming convention: {action}_{resource}[_{chain}]_{source}
+- action: get, search
+- resource: tx, address, address_txs, block_txs, price
+- chain: btc, doge, eth (optional for multi-chain tools)
+- source: mempoolspace, electrs, blockchair, blockcypher, binance
+"""
+
+# from src.tools.blockcypher import get_tx_blockcypher
 from src.tools.electrs import (
-    get_doge_transaction_electrs,
-    get_doge_address_info_electrs,
+    get_txs_doge_electrs,
+    get_address_doge_electrs,
+    get_addresses_txs_doge_electrs,
+    search_txs_doge_electrs,
 )
-from src.tools.mempool import (
-    get_btc_transaction_mempool,
-    get_btc_address_info_mempool,
+# from src.tools.mempool import (
+#     get_tx_btc_mempoolspace,
+#     get_address_btc_mempoolspace,
+#     get_address_txs_btc_mempoolspace,
+#     get_block_txs_btc_mempoolspace,
+# )
+from src.tools.binance import get_price_binance
+from src.tools.registry import (
+    get_all_tools,
+    get_trace_tools,
+    get_trace_fetcher_tools,
 )
-from src.tools.binance import (
-    get_historical_price,
-    get_price_at_timestamp,
-)
-from src.tools.registry import get_all_tools, get_blockchain_tools
 
 __all__ = [
-    "get_btc_transaction",
-    "get_doge_transaction",
-    "get_btc_address_info",
-    "get_doge_address_info",
-    "get_doge_transaction_electrs",
-    "get_doge_address_info_electrs",
-    "get_btc_transaction_mempool",
-    "get_btc_address_info_mempool",
-    "get_historical_price",
-    "get_price_at_timestamp",
+    # BlockCypher (multi-chain fallback)
+    "get_tx_blockcypher",
+    # Mempool.space (BTC - free)
+    "get_tx_btc_mempoolspace",
+    "get_address_btc_mempoolspace",
+    "get_address_txs_btc_mempoolspace",
+    "get_block_txs_btc_mempoolspace",
+    # Electrs (DOGE only - free)
+    "get_txs_doge_electrs",
+    "get_address_doge_electrs",
+    "get_addresses_txs_doge_electrs",
+    "search_txs_doge_electrs",
+    # Binance (price)
+    "get_price_binance",
+    # Registry functions
     "get_all_tools",
-    "get_blockchain_tools",
+    "get_trace_tools",
+    "get_trace_fetcher_tools",
 ]

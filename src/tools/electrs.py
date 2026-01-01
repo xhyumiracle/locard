@@ -1,25 +1,21 @@
 """
 Electrs-Doge API tools for Dogecoin queries.
 
-This is a free, community-hosted Esplora-compatible API for DOGE.
-No API key required.
-
-Base URL: https://doge-electrs-demo.qed.me
+Free, no API key. May have rate limits - use judiciously.
 """
 
-import time
 from typing import Optional, List, Dict, Any
 
 from langchain_core.tools import tool
 from pydantic import BaseModel
 
-import config
+from config import get_asset_unit
 from src.tools.base import BaseAPIClient, with_retry, FatalError, cached
-from src.models.core import (
-    TxLocator, Transfer, Operation, AccountIdentifier,
-    Currency, Amount, CoinChange, EvidenceRef
-)
+from src.tools.models import UtxoTx, Vin, Vout
+from src.tools.filters import filter_tx_by_time, filter_tx_by_address_direction
 
+
+# ==================== Pydantic Models for API Response ====================
 
 class ElectrsChainStats(BaseModel):
     funded_txo_count: int = 0
@@ -40,45 +36,7 @@ class ElectrsAddressInfo(BaseModel):
         return self.chain_stats.funded_txo_sum - self.chain_stats.spent_txo_sum
 
 
-class ElectrsPrevout(BaseModel):
-    scriptpubkey: Optional[str] = None
-    scriptpubkey_address: Optional[str] = None
-    value: int = 0
-
-
-class ElectrsTxInput(BaseModel):
-    txid: str
-    vout: int
-    prevout: Optional[ElectrsPrevout] = None
-    scriptsig: Optional[str] = None
-    sequence: int = 0
-
-
-class ElectrsTxOutput(BaseModel):
-    scriptpubkey: Optional[str] = None
-    scriptpubkey_address: Optional[str] = None
-    scriptpubkey_type: Optional[str] = None
-    value: int = 0
-
-
-class ElectrsTxStatus(BaseModel):
-    confirmed: bool = False
-    block_height: Optional[int] = None
-    block_hash: Optional[str] = None
-    block_time: Optional[int] = None
-
-
-class ElectrsTransaction(BaseModel):
-    txid: str
-    version: int = 1
-    locktime: int = 0
-    vin: List[ElectrsTxInput] = []
-    vout: List[ElectrsTxOutput] = []
-    size: int = 0
-    weight: int = 0
-    fee: int = 0
-    status: ElectrsTxStatus = ElectrsTxStatus()
-
+# ==================== API Client ====================
 
 class ElectrsDogeClient(BaseAPIClient):
     """Electrs-Doge API client (free, no auth) with file caching."""
@@ -86,15 +44,14 @@ class ElectrsDogeClient(BaseAPIClient):
     BASE_URL = "https://doge-electrs-demo.qed.me"
     SOURCE_NAME = "electrs-doge"
 
-    @cached("electrs-doge", model=ElectrsTransaction)
+    @cached("electrs-doge")
     @with_retry()
-    def get_transaction(self, tx_hash: str) -> ElectrsTransaction:
+    def get_transaction(self, tx_hash: str) -> Dict[str, Any]:
         """Fetch transaction details (cached)."""
         tx_hash = tx_hash.lower()
         url = f"{self.BASE_URL}/tx/{tx_hash}"
         response = self.client.get(url)
-        data = self._handle_response(response)
-        return ElectrsTransaction(**data)
+        return self._handle_response(response)
 
     @cached("electrs-doge", model=ElectrsAddressInfo)
     @with_retry()
@@ -158,84 +115,55 @@ class ElectrsDogeClient(BaseAPIClient):
         return self._handle_response(response)
 
 
-def _electrs_tx_to_transfer(
-    tx: ElectrsTransaction,
-    source: str = "electrs-doge"
-) -> Transfer:
-    """Convert Electrs transaction to internal Transfer model."""
-    chain = "DOGE"
-    currency = Currency(symbol=chain, decimals=8)
+# ==================== Conversion Helpers ====================
 
-    locator = TxLocator(
-        chain=chain,
-        txid=tx.txid,
-        status="confirmed" if tx.status.confirmed else "mempool",
-        block_height=tx.status.block_height,
-        block_hash=tx.status.block_hash,
-        block_time=tx.status.block_time
-    )
+# DOGE unit conversion factor
+DOGE_UNIT = get_asset_unit("DOGE")
 
-    operations: List[Operation] = []
+def _raw_tx_to_model(tx_data: dict) -> dict:
+    """Convert raw Electrs tx dict to UtxoTx model dict."""
+    status = tx_data.get("status", {})
+    block_time = status.get("block_time")
 
-    # Process inputs (spent coins)
-    for i, inp in enumerate(tx.vin):
-        addr = None
-        value = None
-        if inp.prevout:
-            addr = inp.prevout.scriptpubkey_address
-            value = str(-inp.prevout.value) if inp.prevout.value else None
+    vin_list = []
+    for i, inp in enumerate(tx_data.get("vin", [])):
+        prevout = inp.get("prevout", {})
+        vin_list.append(Vin(
+            n=i,
+            addr=prevout.get("scriptpubkey_address") if prevout else None,
+            amount=prevout.get("value", 0) / DOGE_UNIT if prevout and prevout.get("value") else None,
+            prev_txid=inp.get("txid"),
+            prev_vout=inp.get("vout")
+        ))
 
-        amount = Amount(value=value, currency=currency) if value else None
+    vout_list = []
+    for i, out in enumerate(tx_data.get("vout", [])):
+        addr = out.get("scriptpubkey_address")
+        if addr is None and out.get("scriptpubkey_type") == "op_return":
+            addr = "OP_RETURN"
+        vout_list.append(Vout(
+            n=i,
+            addr=addr,
+            amount=out.get("value", 0) / DOGE_UNIT
+        ))
 
-        coin_change = CoinChange(
-            coin_id=f"{inp.txid}:{inp.vout}",
-            action="coin_spent"
-        )
+    return UtxoTx(
+        chain="DOGE",
+        txid=tx_data.get("txid"),
+        status="confirmed" if status.get("confirmed") else "pending",
+        block_height=status.get("block_height"),
+        block_time=block_time,
+        fee=tx_data.get("fee", 0) / DOGE_UNIT,
+        vin=vin_list,
+        vout=vout_list,
+        meta={
+            "size": tx_data.get("size"),
+            "weight": tx_data.get("weight"),
+        }
+    ).model_dump()
 
-        op = Operation(
-            op_id=f"vin:{i}",
-            account=AccountIdentifier(address=addr),
-            amount=amount,
-            coin_change=coin_change
-        )
-        operations.append(op)
 
-    # Process outputs (created coins)
-    for i, out in enumerate(tx.vout):
-        addr = out.scriptpubkey_address
-        amount = Amount(value=str(out.value), currency=currency)
-
-        coin_change = CoinChange(
-            coin_id=f"{tx.txid}:{i}",
-            action="coin_created"
-        )
-
-        op = Operation(
-            op_id=f"vout:{i}",
-            account=AccountIdentifier(address=addr),
-            amount=amount,
-            coin_change=coin_change
-        )
-        operations.append(op)
-
-    evidence = EvidenceRef(
-        source=source,
-        locator=locator,
-        retrieved_at=int(time.time()),
-        raw_pointer=f"electrs-doge:{tx.txid}",
-        metadata={"endpoint": f"/tx/{tx.txid}"}
-    )
-
-    fee_amount = Amount(value=str(-tx.fee), currency=currency) if tx.fee else None
-
-    return Transfer(
-        id=tx.txid,
-        locator=locator,
-        operations=operations,
-        evidence_refs=[evidence],
-        fee=fee_amount
-    )
-
+# ==================== Validation Helpers ====================
 
 def _is_valid_tx_hash(tx_hash: str) -> bool:
     """Validate transaction hash format (64 hex characters)."""
@@ -252,373 +180,354 @@ def _is_valid_address(address: str) -> bool:
     """Basic address validation (non-empty, reasonable length, alphanumeric)."""
     if not address or len(address) < 20 or len(address) > 100:
         return False
-    # Reject obvious placeholders
     placeholders = ["sample", "example", "test", "some_", "placeholder", "unknown"]
     lower = address.lower()
     return not any(p in lower for p in placeholders)
 
 
+def _validate_direction_for_search(direction: str, min_amount: float, max_amount: float) -> str:
+    """Validate direction parameter for search_txs (UTXO + amount requires direction)."""
+    if min_amount > 0 or max_amount > 0:
+        if not direction or direction not in ("in", "out", "both"):
+            raise ValueError(
+                "direction is required when amount filter is specified. "
+                "Use 'in' (vout), 'out' (vin), or 'both'."
+            )
+    return direction if direction else "both"
+
+
+def _check_tx_amount(tx: dict, direction: str, min_amount: float, max_amount: float) -> bool:
+    """Check if tx has vin/vout within amount range."""
+    if min_amount <= 0 and max_amount <= 0:
+        return True
+
+    def matches(val):
+        if val is None:
+            return False
+        if min_amount > 0 and val < min_amount:
+            return False
+        if max_amount > 0 and val > max_amount:
+            return False
+        return True
+
+    if direction in ("out", "both"):
+        for vin in tx.get("vin", []):
+            if matches(vin.get("value")):
+                return True
+    if direction in ("in", "both"):
+        for vout in tx.get("vout", []):
+            if matches(vout.get("value")):
+                return True
+    return False
+
+
+def _check_tx_amount_for_address(
+    tx: dict, address: str, direction: str, min_amount: float, max_amount: float
+) -> bool:
+    """Check if tx has vin/vout involving address within amount range."""
+    if min_amount <= 0 and max_amount <= 0:
+        return True
+
+    addr_lower = address.lower()
+
+    def matches(val):
+        if val is None:
+            return False
+        if min_amount > 0 and val < min_amount:
+            return False
+        if max_amount > 0 and val > max_amount:
+            return False
+        return True
+
+    if direction in ("out", "both"):
+        for vin in tx.get("vin", []):
+            if vin.get("addr") and vin["addr"].lower() == addr_lower:
+                if matches(vin.get("value")):
+                    return True
+    if direction in ("in", "both"):
+        for vout in tx.get("vout", []):
+            if vout.get("addr") and vout["addr"].lower() == addr_lower:
+                if matches(vout.get("value")):
+                    return True
+    return False
+
+
+# ==================== Trace Tools (Core) ====================
+
 @tool
-def get_doge_transaction_electrs(tx_hash: str) -> dict:
+def get_txs_doge_electrs(tx_hashes: str) -> dict:
     """
-    Get Dogecoin transaction details using Electrs API (free, no API key).
+    Batch get DOGE transaction details. DOGE ONLY - do not use for other chains.
+
+    Free API (no batch endpoint, uses loop internally).
 
     Args:
-        tx_hash: The Dogecoin transaction hash (txid) - must be a valid 64-character hex string
+        tx_hashes: Comma-separated DOGE transaction hashes
 
     Returns:
-        Transaction details including inputs, outputs, confirmations, and fees
+        txs[]: List of UtxoTx with full details
     """
-    # Validate tx_hash format
-    if not _is_valid_tx_hash(tx_hash):
-        return {
-            "success": False,
-            "error": f"Invalid transaction hash format: '{tx_hash}'. Must be 64 hex characters.",
-            "chain": "DOGE",
-            "txid": tx_hash
-        }
+    hashes = [h.strip() for h in tx_hashes.split(",") if h.strip()]
+    if not hashes:
+        raise ValueError("No valid transaction hashes provided")
+
+    for h in hashes:
+        if not _is_valid_tx_hash(h):
+            raise ValueError(f"Invalid tx hash format: '{h}'. Must be 64 hex characters.")
 
     client = ElectrsDogeClient()
-    try:
-        tx = client.get_transaction(tx_hash)
-        transfer = _electrs_tx_to_transfer(tx)
+    results = []
 
-        inputs_info = []
-        for i, inp in enumerate(tx.vin):
-            if inp.prevout:
-                addr = inp.prevout.scriptpubkey_address or "unknown"
-                val = inp.prevout.value / 1e8
-            else:
-                addr = "unknown"
-                val = 0
-            inputs_info.append(f"vin:{i} <- {addr}: {val:.8f} DOGE")
+    # Electrs has no batch endpoint - loop through each hash
+    for tx_hash in hashes:
+        try:
+            tx_data = client.get_transaction(tx_hash)
+            results.append(_raw_tx_to_model(tx_data))
+        except FatalError:
+            # Skip not found txs, continue with others
+            pass
 
-        outputs_info = []
-        for i, out in enumerate(tx.vout):
-            addr = out.scriptpubkey_address or "unknown"
-            val = out.value / 1e8
-            outputs_info.append(f"vout:{i} -> {addr}: {val:.8f} DOGE")
-
-        return {
-            "success": True,
-            "chain": "DOGE",
-            "txid": tx.txid,
-            "block_height": tx.status.block_height,
-            "block_time": tx.status.block_time,
-            "confirmed": tx.status.confirmed,
-            "fee_doge": tx.fee / 1e8,
-            "size_bytes": tx.size,
-            "inputs": inputs_info,
-            "outputs": outputs_info,
-        }
-    except FatalError as e:
-        return {"success": False, "error": str(e), "chain": "DOGE", "txid": tx_hash}
-    except Exception as e:
-        return {"success": False, "error": str(e), "chain": "DOGE", "txid": tx_hash}
+    return results
 
 
 @tool
-def get_doge_address_info_electrs(address: str) -> dict:
-    """
-    Get Dogecoin address information using Electrs API (free, no API key).
-
-    Args:
-        address: The Dogecoin address - must be a valid address string
-
-    Returns:
-        Address balance and transaction statistics
-    """
-    # Validate address format
-    if not _is_valid_address(address):
-        return {
-            "success": False,
-            "error": f"Invalid address format: '{address}'. Must be a valid Dogecoin address.",
-            "chain": "DOGE",
-            "address": address
-        }
-
-    client = ElectrsDogeClient()
-    try:
-        info = client.get_address_info(address)
-        return {
-            "success": True,
-            "chain": "DOGE",
-            "address": info.address,
-            "balance_doge": info.balance / 1e8,
-            "total_received_doge": info.chain_stats.funded_txo_sum / 1e8,
-            "total_spent_doge": info.chain_stats.spent_txo_sum / 1e8,
-            "tx_count": info.chain_stats.tx_count,
-            "funded_txo_count": info.chain_stats.funded_txo_count,
-            "spent_txo_count": info.chain_stats.spent_txo_count,
-        }
-    except FatalError as e:
-        return {"success": False, "error": str(e), "chain": "DOGE", "address": address}
-    except Exception as e:
-        return {"success": False, "error": str(e), "chain": "DOGE", "address": address}
-
-
-@tool
-def get_doge_address_txs_electrs(
-    address: str,
-    limit: int = 25,
+def search_txs_doge_electrs(
     min_timestamp: int = 0,
-    max_timestamp: int = 0
+    max_timestamp: int = 0,
+    direction: str = "",
+    min_amount: float = 0,
+    max_amount: float = 0,
+    limit: int = 100
 ) -> dict:
     """
-    Get recent transactions for a Dogecoin address using Electrs API (free, no API key).
+    Search DOGE transactions by time and amount. DOGE ONLY - do not use for other chains.
 
-    Use this to find transactions associated with an address for cross-chain tracing.
-    Supports time-based filtering to narrow down search window.
-
-    Args:
-        address: The Dogecoin address - must be a valid address string
-        limit: Maximum number of transactions to return (default 25)
-        min_timestamp: Only return txs AFTER this Unix timestamp (0 = no filter)
-        max_timestamp: Only return txs BEFORE this Unix timestamp (0 = no filter)
-
-    Returns:
-        List of transactions with their details (txid, time, amounts), filtered by time window
-    """
-    if not _is_valid_address(address):
-        return {
-            "success": False,
-            "error": f"Invalid address format: '{address}'. Must be a valid Dogecoin address.",
-            "chain": "DOGE",
-            "address": address
-        }
-
-    client = ElectrsDogeClient()
-    try:
-        txs = client.get_address_txs(address)
-
-        tx_list = []
-        for tx in txs:
-            status = tx.get("status", {})
-            block_time = status.get("block_time")
-
-            # Apply time filter if specified
-            if min_timestamp > 0 and block_time and block_time < min_timestamp:
-                continue
-            if max_timestamp > 0 and block_time and block_time > max_timestamp:
-                continue
-
-            # Find relevant inputs/outputs for this address
-            received = 0
-            sent = 0
-
-            for inp in tx.get("vin", []):
-                prevout = inp.get("prevout", {})
-                if prevout and prevout.get("scriptpubkey_address") == address:
-                    sent += prevout.get("value", 0)
-
-            for out in tx.get("vout", []):
-                if out.get("scriptpubkey_address") == address:
-                    received += out.get("value", 0)
-
-            tx_list.append({
-                "txid": tx.get("txid"),
-                "block_time": block_time,
-                "block_height": status.get("block_height"),
-                "confirmed": status.get("confirmed", False),
-                "received_doge": received / 1e8,
-                "sent_doge": sent / 1e8,
-                "net_doge": (received - sent) / 1e8,
-                "fee_doge": tx.get("fee", 0) / 1e8,
-            })
-
-            # Stop if we have enough
-            if len(tx_list) >= limit:
-                break
-
-        return {
-            "success": True,
-            "chain": "DOGE",
-            "address": address,
-            "tx_count": len(tx_list),
-            "time_filter": f"{min_timestamp}-{max_timestamp}" if min_timestamp or max_timestamp else "none",
-            "transactions": tx_list,
-        }
-    except FatalError as e:
-        return {"success": False, "error": str(e), "chain": "DOGE", "address": address}
-    except Exception as e:
-        return {"success": False, "error": str(e), "chain": "DOGE", "address": address}
-
-
-@tool
-def search_doge_txs_by_time(
-    min_timestamp: int,
-    max_timestamp: int,
-    min_amount_doge: float = 0,
-    max_amount_doge: float = 0,
-    limit: int = 20,
-    max_blocks: int = 0
-) -> dict:
-    """
-    Search DOGE transactions within a time window, optionally filtered by amount.
-
-    This tool scans blocks in the time range and returns matching transactions.
-    Useful for finding cross-chain source transactions when you don't have a specific address.
+    Free API. Scans blocks in time range.
 
     Args:
-        min_timestamp: Start of time window (Unix timestamp)
-        max_timestamp: End of time window (Unix timestamp)
-        min_amount_doge: Minimum transaction output amount in DOGE (0 = no filter)
-        max_amount_doge: Maximum transaction output amount in DOGE (0 = no filter)
-        limit: Maximum transactions to return (default 20)
-        max_blocks: Maximum blocks to scan (0 = auto-compute from time window, ~1 block/min)
+        min_timestamp: Start time (Unix), 0 = no lower bound
+        max_timestamp: End time (Unix), 0 = no upper bound
+        direction: "in" (vout), "out" (vin), "both" - REQUIRED when amount specified
+        min_amount: Min single vin/vout amount (DOGE), 0 = no filter
+        max_amount: Max single vin/vout amount, 0 = no upper bound, equal to min = exact match
+        limit: Max results (default 100)
 
     Returns:
-        List of transactions matching the criteria with their details
+        txs[]: List of UtxoTx matching criteria
     """
-    if min_timestamp <= 0 or max_timestamp <= 0:
-        return {
-            "success": False,
-            "error": "Both min_timestamp and max_timestamp must be positive Unix timestamps",
-            "chain": "DOGE"
-        }
+    direction = _validate_direction_for_search(direction, min_amount, max_amount)
 
-    if min_timestamp >= max_timestamp:
-        return {
-            "success": False,
-            "error": "min_timestamp must be less than max_timestamp",
-            "chain": "DOGE"
-        }
-
-    # Auto-compute max_blocks from time window if not specified
-    # DOGE block time is ~60 seconds, add 20% buffer
-    if max_blocks <= 0:
-        time_window_seconds = max_timestamp - min_timestamp
-        max_blocks = int((time_window_seconds / 60) * 1.2) + 5  # 20% buffer + 5 extra
+    if min_timestamp <= 0 and max_timestamp <= 0:
+        raise ValueError("At least one of min_timestamp or max_timestamp must be specified")
 
     client = ElectrsDogeClient()
-    try:
-        # Step 1: Find blocks in the time window using binary search
-        recent_blocks = client.get_blocks()
-        if not recent_blocks:
-            return {"success": False, "error": "Could not fetch recent blocks", "chain": "DOGE"}
 
-        latest_block = recent_blocks[0]
-        latest_height = latest_block.get("height")
-        latest_time = latest_block.get("timestamp")
+    # Get recent blocks to find the time range
+    recent_blocks = client.get_blocks()
+    if not recent_blocks:
+        raise ValueError("Could not fetch recent blocks")
 
-        # Binary search to find block at max_timestamp
-        def find_block_at_time(target_time: int) -> int:
-            """Binary search to find block height closest to target time."""
-            # Estimate how far back we need to go based on ~60 sec block time
-            time_diff = latest_time - target_time
-            estimated_blocks_back = int(time_diff / 60) + 10000  # Add buffer
-            low = max(0, latest_height - estimated_blocks_back)
-            high = latest_height
+    latest_block = recent_blocks[0]
+    latest_height = latest_block.get("height")
+    latest_time = latest_block.get("timestamp")
 
-            while low < high:
-                mid = (low + high) // 2
-                try:
-                    block_hash = client.get_block_hash_by_height(mid)
-                    block_info = client.get_block_info(block_hash)
-                    block_time = block_info.get("timestamp", 0)
+    # Binary search to find block at target time
+    def find_block_at_time(target_time: int) -> int:
+        time_diff = latest_time - target_time
+        estimated_blocks_back = int(time_diff / 60) + 10000
+        low = max(0, latest_height - estimated_blocks_back)
+        high = latest_height
 
-                    if block_time < target_time:
-                        low = mid + 1
-                    else:
-                        high = mid
-                except Exception:
-                    high = mid
-            return low
-
-        # Find block heights for the time window
-        end_height = find_block_at_time(max_timestamp) + 5  # Add buffer
-        start_height = find_block_at_time(min_timestamp) - 5  # Add buffer
-        start_height = max(0, start_height)
-
-        # Step 2: Scan blocks in the range using batch tx endpoint
-        blocks_scanned = 0
-        tx_list = []
-        current_height = end_height
-
-        while current_height >= start_height and blocks_scanned < max_blocks and len(tx_list) < limit:
+        while low < high:
+            mid = (low + high) // 2
             try:
-                block_hash = client.get_block_hash_by_height(current_height)
-                if not block_hash:
-                    current_height -= 1
-                    continue
-
+                block_hash = client.get_block_hash_by_height(mid)
                 block_info = client.get_block_info(block_hash)
                 block_time = block_info.get("timestamp", 0)
-                block_height = block_info.get("height", current_height)
 
-                # Check if block is in our time window
-                if block_time < min_timestamp:
-                    break  # Past our window, stop
-                if block_time > max_timestamp:
-                    current_height -= 1
-                    continue  # Not yet in our window
-
-                blocks_scanned += 1
-
-                # Fetch transactions in batches of 25 using the batch endpoint
-                start_index = 0
-                max_txs_per_block = 50  # Limit how many txs we check per block
-
-                while start_index < max_txs_per_block and len(tx_list) < limit:
-                    try:
-                        # Fetch batch of transactions (up to 25 per call)
-                        txs_batch = client.get_block_txs(block_hash, start_index)
-                        if not txs_batch:
-                            break  # No more transactions in this block
-
-                        for tx in txs_batch:
-                            if len(tx_list) >= limit:
-                                break
-
-                            # Calculate total output value
-                            vouts = tx.get("vout", [])
-                            total_output = sum(out.get("value", 0) for out in vouts) / 1e8
-
-                            # Apply amount filter if specified
-                            if min_amount_doge > 0 and total_output < min_amount_doge:
-                                continue
-                            if max_amount_doge > 0 and total_output > max_amount_doge:
-                                continue
-
-                            # Build output info
-                            outputs_info = []
-                            for i, out in enumerate(vouts[:5]):  # First 5 outputs
-                                addr = out.get("scriptpubkey_address") or "unknown"
-                                val = out.get("value", 0) / 1e8
-                                outputs_info.append(f"vout:{i} -> {addr}: {val:.8f} DOGE")
-
-                            tx_list.append({
-                                "txid": tx.get("txid"),
-                                "block_height": block_height,
-                                "block_time": block_time,
-                                "total_output_doge": total_output,
-                                "fee_doge": tx.get("fee", 0) / 1e8,
-                                "outputs": outputs_info,
-                            })
-
-                        start_index += len(txs_batch)
-                        if len(txs_batch) < 25:
-                            break  # No more transactions
-
-                    except Exception:
-                        break  # Skip remaining txs in this block on error
-
-                current_height -= 1
-
+                if block_time < target_time:
+                    low = mid + 1
+                else:
+                    high = mid
             except Exception:
+                high = mid
+        return low
+
+    # Find block heights for time window
+    if max_timestamp > 0:
+        end_height = find_block_at_time(max_timestamp) + 5
+    else:
+        end_height = latest_height
+
+    if min_timestamp > 0:
+        start_height = find_block_at_time(min_timestamp) - 5
+        start_height = max(0, start_height)
+    else:
+        # Default to scanning last 100 blocks if no min time
+        start_height = max(0, end_height - 100)
+
+    # Auto-compute max blocks from time window
+    max_blocks = int((end_height - start_height) * 1.2) + 10
+
+    # Scan blocks
+    tx_list = []
+    blocks_scanned = 0
+    current_height = end_height
+
+    while current_height >= start_height and blocks_scanned < max_blocks and len(tx_list) < limit:
+        try:
+            block_hash = client.get_block_hash_by_height(current_height)
+            if not block_hash:
                 current_height -= 1
                 continue
 
-        return {
-            "success": True,
-            "chain": "DOGE",
-            "time_window": f"{min_timestamp}-{max_timestamp}",
-            "amount_filter": f"{min_amount_doge}-{max_amount_doge}" if min_amount_doge or max_amount_doge else "none",
-            "blocks_scanned": blocks_scanned,
-            "tx_count": len(tx_list),
-            "transactions": tx_list,
-        }
-    except FatalError as e:
-        return {"success": False, "error": str(e), "chain": "DOGE"}
-    except Exception as e:
-        return {"success": False, "error": str(e), "chain": "DOGE"}
+            block_info = client.get_block_info(block_hash)
+            block_time = block_info.get("timestamp", 0)
+            block_height = block_info.get("height", current_height)
+
+            # Check time bounds
+            if min_timestamp > 0 and block_time < min_timestamp:
+                break
+            if max_timestamp > 0 and block_time > max_timestamp:
+                current_height -= 1
+                continue
+
+            blocks_scanned += 1
+
+            # Fetch txs in batches of 25
+            start_index = 0
+            max_txs_per_block = 100
+
+            while start_index < max_txs_per_block and len(tx_list) < limit:
+                try:
+                    txs_batch = client.get_block_txs(block_hash, start_index)
+                    if not txs_batch:
+                        break
+
+                    for tx_raw in txs_batch:
+                        if len(tx_list) >= limit:
+                            break
+
+                        tx_model = _raw_tx_to_model(tx_raw)
+
+                        # Apply amount filter
+                        if not _check_tx_amount(tx_model, direction, min_amount, max_amount):
+                            continue
+
+                        tx_list.append(tx_model)
+
+                    start_index += len(txs_batch)
+                    if len(txs_batch) < 25:
+                        break
+                except Exception:
+                    break
+
+            current_height -= 1
+        except Exception:
+            current_height -= 1
+            continue
+
+    return tx_list
+
+
+@tool
+def get_addresses_txs_doge_electrs(
+    addresses: str,
+    min_timestamp: int = 0,
+    max_timestamp: int = 0,
+    direction: str = "both",
+    min_amount: float = 0,
+    max_amount: float = 0,
+    limit: int = 100
+) -> dict:
+    """
+    Get DOGE transaction history for addresses with filtering. DOGE ONLY - do not use for other chains.
+
+    Free API.
+
+    Args:
+        addresses: Comma-separated DOGE addresses
+        min_timestamp: Filter after this Unix time (0 = no filter)
+        max_timestamp: Filter before this Unix time (0 = no filter)
+        direction: "in" (receiving), "out" (sending), "both" (default)
+        min_amount: Min single vin/vout amount involving the address (DOGE), 0 = no filter
+        max_amount: Max single vin/vout amount, 0 = no upper bound
+        limit: Max txs per address (default 100)
+
+    Returns:
+        {address: txs[]} - Transactions grouped by address
+    """
+    addr_list = [a.strip() for a in addresses.split(",") if a.strip()]
+    if not addr_list:
+        raise ValueError("No valid addresses provided")
+
+    for addr in addr_list:
+        if not _is_valid_address(addr):
+            raise ValueError(f"Invalid address format: '{addr}'")
+
+    if direction not in ("in", "out", "both"):
+        raise ValueError(f"Invalid direction: {direction}. Use 'in', 'out', or 'both'.")
+
+    client = ElectrsDogeClient()
+    result: Dict[str, list] = {addr: [] for addr in addr_list}
+
+    # Electrs has no batch address endpoint - loop through each
+    for addr in addr_list:
+        try:
+            txs_raw = client.get_address_txs(addr)
+
+            for tx_raw in txs_raw:
+                if len(result[addr]) >= limit:
+                    break
+
+                tx_model = _raw_tx_to_model(tx_raw)
+
+                # Apply time filter
+                if not filter_tx_by_time(tx_model, min_timestamp, max_timestamp):
+                    continue
+
+                # Apply direction filter
+                if not filter_tx_by_address_direction(tx_model, addr, direction, is_utxo=True):
+                    continue
+
+                # Apply amount filter for this address
+                if not _check_tx_amount_for_address(tx_model, addr, direction, min_amount, max_amount):
+                    continue
+
+                result[addr].append(tx_model)
+
+        except FatalError:
+            # Address not found - leave empty list
+            pass
+
+    return result
+
+
+# ==================== Utility Tools (Non-trace) ====================
+
+@tool
+def get_address_doge_electrs(address: str) -> dict:
+    """
+    Get DOGE address balance and stats (no tx details). DOGE ONLY - do not use for other chains.
+
+    Free API.
+
+    Args:
+        address: DOGE address
+
+    Returns:
+        chain, balance, total_received, total_spent, tx_count
+    """
+    if not _is_valid_address(address):
+        raise ValueError(f"Invalid address format: '{address}'")
+
+    client = ElectrsDogeClient()
+    info = client.get_address_info(address)
+
+    return {
+        "chain": "DOGE",
+        "balance": info.balance / DOGE_UNIT,
+        "total_received": info.chain_stats.funded_txo_sum / DOGE_UNIT,
+        "total_spent": info.chain_stats.spent_txo_sum / DOGE_UNIT,
+        "tx_count": info.chain_stats.tx_count,
+    }

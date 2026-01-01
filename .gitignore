@@ -13,3 +13,4 @@ wheels/
 .cache/
 archived/
 .env
+.DS_Store

@@ -1,31 +1,25 @@
 """Core data models for BlockchainMAS"""
 
 from src.models.core import (
-    TxLocator,
     TxStatus,
-    EvidenceRef,
     AccountIdentifier,
-    Currency,
-    Amount,
-    CoinAction,
-    CoinChange,
     Operation,
     Transfer,
-    OpRef,
     CrossChainLink,
+)
+from src.models.finding import (
+    Finding,
+    format_finding_data,
+    format_findings,
 )
 
 __all__ = [
-    "TxLocator",
     "TxStatus",
-    "EvidenceRef",
     "AccountIdentifier",
-    "Currency",
-    "Amount",
-    "CoinAction",
-    "CoinChange",
     "Operation",
     "Transfer",
-    "OpRef",
     "CrossChainLink",
+    "Finding",
+    "format_finding_data",
+    "format_findings",
 ]

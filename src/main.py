@@ -5,12 +5,16 @@ Usage:
     python -m src.main                    # Interactive mode
     python -m src.main "trace tx ..."     # Single query mode
     python -m src.main --example          # Run example from docs
+    python -m src.main --batch FILE       # Run queries from YAML batch file
 """
 
 import sys
 import logging
 import argparse
+from pathlib import Path
 from typing import Optional
+
+import yaml
 
 from dotenv import load_dotenv
 
@@ -144,6 +148,74 @@ def run_example():
     return 0
 
 
+def run_batch(batch_file: str) -> int:
+    """
+    Run multiple queries from a YAML batch file.
+
+    Args:
+        batch_file: Path to YAML file containing queries
+
+    Returns:
+        Exit code (0 for success, non-zero for errors)
+    """
+    batch_path = Path(batch_file)
+    if not batch_path.exists():
+        print(f"Error: Batch file not found: {batch_file}")
+        return 1
+
+    try:
+        with open(batch_path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+    except yaml.YAMLError as e:
+        print(f"Error parsing YAML file: {e}")
+        return 1
+
+    queries = data.get("queries", [])
+    if not queries:
+        print("No queries found in batch file.")
+        return 0
+
+    print("\n" + "=" * 60)
+    print(f"Running Batch: {batch_path.name}")
+    print(f"Total queries: {len(queries)}")
+    print("=" * 60)
+
+    errors = 0
+    for i, item in enumerate(queries, 1):
+        query = item.get("query", "").strip()
+        comment = item.get("comment", "")
+
+        if not query:
+            continue
+
+        print(f"\n[{i}/{len(queries)}] Query:")
+        print("-" * 60)
+        print(query)
+        print("-" * 60)
+        print("Processing...\n")
+
+        try:
+            response = run_single_query(query)
+            print("\nResponse:")
+            print("-" * 60)
+            print(response)
+            print("-" * 60)
+            if comment:
+                print(f"\n{comment}")
+        except Exception as e:
+            print(f"\nError: {e}")
+            if config.DEBUG_MODE:
+                import traceback
+                traceback.print_exc()
+            errors += 1
+
+    print("\n" + "=" * 60)
+    print(f"Batch complete. {len(queries) - errors}/{len(queries)} succeeded.")
+    print("=" * 60)
+
+    return 1 if errors > 0 else 0
+
+
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(
@@ -160,9 +232,21 @@ def main():
         help="Run the example from documentation"
     )
     parser.add_argument(
+        "--batch",
+        type=str,
+        metavar="FILE",
+        help="Run queries from a YAML batch file"
+    )
+    parser.add_argument(
         "--debug",
         action="store_true",
         help="Enable debug mode"
+    )
+    parser.add_argument(
+        "-v", "--verbose",
+        action="count",
+        default=0,
+        help="Verbose output: -v for messages only, -vv for full state"
     )
 
     args = parser.parse_args()
@@ -171,10 +255,15 @@ def main():
         config.DEBUG_MODE = True
         config.LOG_LEVEL = "DEBUG"
 
+    if args.verbose:
+        config.VERBOSE_LEVEL = args.verbose
+
     setup_logging()
 
     if args.example:
         sys.exit(run_example())
+    elif args.batch:
+        sys.exit(run_batch(args.batch))
     elif args.query:
         response = run_single_query(args.query)
         print(response)

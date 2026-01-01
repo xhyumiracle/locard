@@ -21,10 +21,9 @@ Methodology: I want this project to follow an iterative evolution approach, avoi
 1. Reference Rosetta protocol's transaction abstraction
 2. Main components:
    1. TxLocator - for locating native transactions
-   2. Transaction - internal and GraphState transaction abstraction, compatible with both UTXO and Account-based chains
-   3. CrossChainLink - for marking cross-chain structures
-   4. EvidenceRef (ignore for now, will discuss later) - for recording where TxLocator was obtained
-3. Comments in pseudocode below can be ignored
+   2. Transfer - internal and GraphState transaction abstraction, compatible with both UTXO and Account-based chains
+   3. CrossChainLink - for marking cross-chain structures (self-contained with Transfer references)
+   4. EvidenceRef - for recording where TxLocator was obtained
 
 ```py
 from __future__ import annotations
@@ -33,9 +32,8 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Literal, Optional
 
 
-# ---------- Core locators / evidence ----------
-
 TxStatus = Literal["confirmed", "mempool", "dropped"]
+TransferType = Literal["utxo", "account"]
 
 
 @dataclass(frozen=True)
@@ -44,58 +42,26 @@ class TxLocator:
     chain: str                 # e.g. "BTC", "DOGE", "ETH"
     txid: str                  # tx hash / id (string)
     status: TxStatus = "confirmed"
-
-    # confirmed-only (optional but recommended)
     block_height: Optional[int] = None
     block_hash: Optional[str] = None
     block_time: Optional[int] = None  # unix seconds
-
-    # optional; often unavailable / unstable across data sources
-    # tx_index_in_block: Optional[int] = None
 
 
 @dataclass(frozen=True)
 class EvidenceRef:
     """How/where you retrieved the raw data for a locator (audit/replay)."""
-    source: str                       # e.g. "blockstream", "blockchair", "own-node", "fx-binance"
-    locator: Optional[TxLocator]      # sometimes evidence isn't tx-bound (e.g., FX query)
-    retrieved_at: int                 # unix seconds
-
-    # pointers to raw payload
-    raw_pointer: str                  # file path / object key / db id
-    # content_hash: Optional[str] = None  # for tamper-evidence / dedup
-
-    # request/provenance (optional but useful)
-    #query: Optional[Dict[str, Any]] = None
+    source: str                       # e.g. "blockcypher", "blockchair", "electrs"
+    locator: Optional[TxLocator] = None
+    retrieved_at: int = 0             # unix seconds
+    raw_pointer: str = ""             # file path / object key / db id
     metadata: Dict[str, Any] = field(default_factory=dict)
 
-
-# ---------- Rosetta-aligned primitives ----------
 
 @dataclass(frozen=True)
 class AccountIdentifier:
-    """Rosetta-style account identifier.
-
-    For UTXO outputs, address may be the decoded address if available;
-    otherwise keep address=None and put script-hash/type in metadata.
-    """
+    """Rosetta-style account identifier."""
     address: Optional[str]
     metadata: Dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class Currency:
-    """Rosetta-style currency. For tokens, use contract address as 'symbol' or put in metadata."""
-    symbol: str                       # e.g. "BTC", "ETH", "USDC"
-    decimals: Optional[int] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)  # e.g. {"contract":"0x...", "chain":"ETH"}
-
-
-@dataclass(frozen=True)
-class Amount:
-    """Signed string value in smallest units (e.g., satoshi, wei, token base units)."""
-    value: str                        # e.g. "-500000000" or "+25000000"
-    currency: Currency
 
 
 CoinAction = Literal["coin_created", "coin_spent"]
@@ -104,7 +70,7 @@ CoinAction = Literal["coin_created", "coin_spent"]
 @dataclass(frozen=True)
 class CoinChange:
     """UTXO-only: identifies discrete coin lifecycle changes."""
-    coin_id: str              # recommended "txid:vout" (created) or "prev_txid:prev_vout" (spent)
+    coin_id: str              # "txid:vout" (created) or "prev_txid:prev_vout" (spent)
     action: CoinAction
 
 
@@ -112,62 +78,70 @@ class CoinChange:
 class Operation:
     """Rosetta-style operation: one account/coin state change.
     - Account-based chains: use account + signed amount (coin_change usually None)
-    - UTXO chains: coin_change anchors coin continuity; amount is typically +/- vout/vin value if available
+    - UTXO chains: coin_change anchors coin continuity
+
+    Amount is always in human-readable units (e.g., 1.5 BTC, not satoshis).
+
+    op_id naming convention:
+    - UTXO: "vin:N", "vout:N"
+    - Account native: "v:0" (internal: "v:1", "v:2" for future)
+    - Account ERC20: "e:N" where N = log index
+
+    Note: CrossChainLink uses op_idx (array index into Transfer.operations) for precise lookup.
+    For Account chains, one op_id maps to TWO operations (in/out with opposite amounts).
     """
-    op_id: str         # stable within tx; e.g. "vin:0", "vout:2", "log:7", "trace:3"
+    op_id: str                          # semantic id; e.g. "vin:0", "vout:2", "v:0", "e:3"
     account: AccountIdentifier
-    amount: Optional[Amount] = None   # optional for some spent coins if value not readily available
+    amount: Optional[float] = None      # signed amount in human-readable units
+    asset: Optional[str] = None         # e.g. "BTC", "ETH", "USDC"
+    decimals: Optional[int] = None      # precision for this asset (e.g., 8 for BTC, 18 for ETH)
     coin_change: Optional[CoinChange] = None
-    related_operations: List[str] = field(default_factory=list)
 
-    # optional: attach evidence refs at op granularity (usually tx-level is enough)
-    # evidence_refs: List[EvidenceRef] = field(default_factory=list)
-
-
-# ---------- Your "Transfer" (tx-level operation group) ----------
 
 @dataclass
 class Transfer:
-    """Transaction-level transfer group (your core 'Transfer').
-
-    This is essentially Rosetta Transaction semantics:
-    a group of operations for one on-chain tx.
+    """Transaction-level transfer group.
+    Essentially Rosetta Transaction semantics: a group of operations for one on-chain tx.
     """
-    # Convention:
-    # - Default: transfer.id == native tx hash
-
-    id: str
-
+    id: str                                        # usually == txid
     locator: TxLocator
     operations: List[Operation]
-
-    # audit/replay; keep raw tx payloads only via pointers
+    type: TransferType                             # "utxo" for BTC/DOGE/LTC, "account" for ETH/etc.
     evidence_refs: List[EvidenceRef] = field(default_factory=list)
-
-    # optional convenience fields
-    fee: Optional[Amount] = None
-
-# ---------- Cross-chain link (inference, not fact) ----------
-
-@dataclass(frozen=True)
-class OpRef:
-    chain: str
-    transfer_id: str
-    op_id: str
-
-# LinkType = Literal["bridge", "swap", "exchange_deposit", "exchange_withdraw", "unknown"]
 
 
 @dataclass
 class CrossChainLink:
-    """Inference edge between two chains' operations."""
+    """Inference edge between two chains' operations.
+
+    Price Direction: 1 src_coin = [price_min, price_max] dst_coin (raw, no buffer)
+    """
     id: str
-    # Convention: link_id = "{src.chain}:{src.transfer_id}:{src.op_id}->{dst.chain}:{dst.transfer_id}:{dst.op_id}"
 
-    src: OpRef
-    dst: OpRef
+    # Source/Destination operation references (op_idx into Transfer.operations)
+    src_transfer: Transfer
+    src_op_idx: int
+    dst_transfer: Transfer
+    dst_op_idx: int
 
-    confidence: float                               # 0..1 (or keep uncalibrated for v1)
+    # Price range at src tx time (raw, no buffer)
+    price_min: Optional[float] = None
+    price_max: Optional[float] = None
+
+    # Computed during scoring
+    time_diff: Optional[int] = None
+    fee_rate_min: Optional[float] = None
+    fee_rate_max: Optional[float] = None
+
+    # Exclusion
+    excluded: bool = False
+    exclude_reason: Optional[str] = None
+
+    # Scores (0..1)
+    f_time: float = 0.0
+    f_amount: float = 0.0
+    confidence: float = 0.0
+
     evidence_refs: List[EvidenceRef] = field(default_factory=list)
 
 ```
@@ -347,16 +321,32 @@ You are the Blockchain Trace Orchestrator Agent. You control the static tracing 
 - Return structure:
 ```python
 class TaskWant(TypedDict, total=False):
-    k: int                                    # top-k hits desired
+    k: int
     kinds: List[Literal["tx", "event", "address"]]
+
+class CandidateOutput(TypedDict):
+    txid: str
+    chain: str
+    op_id: str
+    amount: float
+    price_min: float
+    price_max: float
+
+class DestInfo(TypedDict):
+    txid: str
+    chain: str
+    op_id: str
+    amount: float
 
 class TraceOrchestratorOutput(TypedDict):
     action: Literal["continue", "stop"]
     # if continue
-    task_brief: Optional[str]                 # instruction for Fetcher
+    task_brief: Optional[str]
     want: Optional[TaskWant]
-    # if stop
-    answer_text: Optional[str]                # final answer to user
+    # if stop - structured data for scoring
+    candidates: Optional[List[CandidateOutput]]
+    dest_info: Optional[DestInfo]
+    stop_reason: Optional[str]  # ready_for_scoring, no_candidates, tool_failure
 ```
 
 ---
@@ -488,10 +478,10 @@ class ToolResult(TypedDict):
     source: str       # where it came from
 
 class ToolReport(TypedDict):
-    plan: str                # echoed tool plan
+    task: str                # echoed tool plan
     results: List[ToolResult]
-    sources: List[str]       # list of source URLs/titles
-    gaps: List[str]          # optional, remaining uncertainties
+    sources: List[str]
+    gaps: List[str]
 ```
 
 ## Error Handling

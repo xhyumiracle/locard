@@ -1,0 +1,159 @@
+"""
+Debug utilities for BlockchainMAS.
+
+Provides verbose logging for agent input/output to help with debugging.
+
+Verbosity levels:
+  -v  (level 1): Print LLM messages for each agent
+  -vv (level 2): Print full state (truncated)
+"""
+
+import json
+from typing import List, Any
+
+import config
+
+
+def _format_messages(messages: list, max_len: int = None) -> str:
+    """Format messages list for clean output, including tool calls."""
+    if not messages:
+        return "  (no messages)"
+
+    lines = []
+    for m in messages:
+        # Handle both LangChain message objects and dicts
+        if isinstance(m, dict):
+            content = m.get("content", str(m))
+            msg_type = m.get("role", "unknown")
+            tool_calls = m.get("tool_calls", [])
+            tool_name = None
+        else:
+            content = getattr(m, "content", str(m))
+            msg_type = getattr(m, "type", type(m).__name__)
+            tool_calls = getattr(m, "tool_calls", [])
+            tool_name = getattr(m, "name", None)  # For ToolMessage
+
+        # For ToolMessage, show the tool name and tool_call_id
+        tool_call_id = getattr(m, "tool_call_id", None) if not isinstance(m, dict) else m.get("tool_call_id")
+        if msg_type == "tool" and tool_name:
+            msg_type = f"tool:{tool_name}"
+            if tool_call_id:
+                msg_type = f"tool:{tool_name}[{tool_call_id}]"
+
+        # No truncation for debug output - show everything
+
+        # Indent multiline content
+        if isinstance(content, str):
+            content_lines = content.split("\n")
+            if len(content_lines) > 1:
+                content = content_lines[0] + "\n" + "\n".join("    " + l for l in content_lines[1:])
+
+        lines.append(f"  [{msg_type}] {content}")
+
+        # Show tool calls if present (AIMessage requesting tool use)
+        if tool_calls:
+            for tc in tool_calls:
+                if isinstance(tc, dict):
+                    tc_name = tc.get("name", "?")
+                    tc_args = tc.get("args", {})
+                    tc_id = tc.get("id", "")
+                else:
+                    tc_name = getattr(tc, "name", "?")
+                    tc_args = getattr(tc, "args", {})
+                    tc_id = getattr(tc, "id", "")
+                # Show full args - no truncation for debug
+                args_str = str(tc_args)
+                id_str = f"[{tc_id}]" if tc_id else ""
+                lines.append(f"    -> tool_call{id_str}: {tc_name}({args_str})")
+
+    return "\n".join(lines)
+
+
+def format_label(label: str, pad_char: str = '=', length: int = 60) -> str:
+    """Format a centered label with padding characters."""
+    if not label:
+        return pad_char * length
+    # Calculate padding on each side
+    label_len = len(label)
+    total_padding = length - label_len
+    left_padding = total_padding // 2
+    right_padding = total_padding - left_padding
+    return f"{pad_char * left_padding}{label}{pad_char * right_padding}"
+
+
+def print_agent_begin(node_name: str):
+    if config.VERBOSE_LEVEL < 1:
+        return
+    label = f"[{node_name}] AGENT BEGIN"
+    print(f"\n{format_label(label, '=', 60)}")
+
+
+def print_agent_end(node_name: str):
+    if config.VERBOSE_LEVEL < 1:
+        return
+    label = f"[{node_name}] AGENT END"
+    print(f"\n{format_label(label, '=', 60)}")
+
+def print_messages(node_name: str, section: str, messages: List[Any] = None):
+    """
+    Print messages for debugging.
+
+    Args:
+        node_name: Name of the node (e.g., "router", "trace_orchestrator")
+        section: e.g. "Agent Output" or "Agent Input"
+        messages: Optional full message history (shows tool calls in execution order)
+    """
+    if config.VERBOSE_LEVEL < 1:
+        return
+
+    _m = f"[{node_name}] {section}"
+    print(f"\n{format_label(_m, '-', 60)}")
+
+    if messages:
+        print(_format_messages(messages))
+        print()
+
+    print(f"{'-'*60}\n")
+    
+def print_structure_output(node_name: str, output: Any):
+    """
+    Print structured output for debugging.
+
+    Args:
+        node_name: Name of the node (e.g., "router", "trace_orchestrator")
+        output: Agent output (structured or raw)
+    """
+    if config.VERBOSE_LEVEL < 1:
+        return
+    if output is None:
+        return
+
+    _m = f"[{node_name}] Structured Output"
+    print(f"\n{format_label(_m, '-', 60)}")
+
+    if isinstance(output, dict):
+        for k, v in output.items():
+            print(f"  {k}: {v}")
+    else:
+        print(f"  {output}")
+    print(f"{'-'*60}\n")
+
+
+
+def _format_state_full(state: dict, max_len: int = None) -> str:
+    """Format full state dict for debug output (no truncation)."""
+    result = {}
+    for k, v in state.items():
+        if k == "messages":
+            msgs = []
+            for m in v if v else []:
+                content = getattr(m, "content", str(m))
+                # No truncation for debug
+                msg_type = getattr(m, "type", type(m).__name__)
+                msgs.append(f"[{msg_type}] {content}")
+            result[k] = msgs
+        elif isinstance(v, dict):
+            result[k] = _format_state_full(v, max_len)
+        else:
+            result[k] = v
+    return json.dumps(result, indent=2, default=str, ensure_ascii=False)

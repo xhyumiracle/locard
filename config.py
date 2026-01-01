@@ -17,14 +17,14 @@ load_dotenv()
 
 # ==================== Agent Loop Limits ====================
 
-# Trace workflow
-TRACE_MAX_ITERATIONS = 10      # Orchestrator 最大迭代次数
+# Trace workflow - dynamic planning with iteration limit
+TRACE_MAX_ITERATIONS = 25      # 最大迭代次数（orchestrator → fetcher 循环）
 TRACE_MAX_DEPTH = 5            # 跨链溯源最大跳数（CrossChainLink 数量上限）
 TRACE_MAX_ERRORS = 100         # Error 列表软上限（超过后考虑终止）
 TRACE_ERRORS_WARNING = 50      # Error 警告阈值（触发策略评估）
 
 # Fallback workflow
-FALLBACK_MAX_ITERATIONS = 8    # Fallback Orchestrator 最大迭代次数
+FALLBACK_MAX_ITERATIONS = 15   # 最大迭代次数
 FALLBACK_MAX_ERRORS = 50       # Fallback workflow error 上限
 
 
@@ -82,10 +82,24 @@ CCLINK_CONFIDENCE_LOW = 0.35   # 低于此不连边（认为是噪声）
 CCLINK_CONFIDENCE_HIGH = 0.75  # 高于此自动选为主链路（高置信度）
 CCLINK_TOP_K_CANDIDATES = 5    # 保留候选数（每个 src_op 最多保留多少候选）
 
-# Exponential decay parameters (for time/value features)
+# Exponential decay parameters (for time/amount features)
 CCLINK_TAU_TIME_BRIDGE = 30 * 60      # 桥的时间衰减常数 (30分钟)
 CCLINK_TAU_TIME_EXCHANGE = 12 * 3600  # 交易所的时间衰减常数 (12小时)
 CCLINK_TAU_VALUE = 0.05               # 价值衰减常数 (5%)
+
+# Price buffer percentages for scoring (applied to raw price range from Binance)
+# These expand the price range to account for market realities:
+# - PRICE_MAX_FEE_RATE: max acceptable fee rate, expands lower bound (min_price * (1 - rate))
+#   This creates room for swap fees, bridge fees, slippage, etc.
+# - PRICE_MAX_DEVIATION_RATE: max price deviation across platforms, expands upper bound (max_price * (1 + rate))
+#   This accounts for price differences between Binance and actual swap platform
+PRICE_MAX_FEE_RATE = 0.10             # 10% - max acceptable fee rate (lower buffer)
+PRICE_MAX_DEVIATION_RATE = 0.01       # 1% - max price deviation across platforms (upper buffer)
+
+# Scoring feature weights and decay constants
+SCORING_TAU_TIME = 1800               # Time decay constant (30 minutes)
+SCORING_W_TIME = 2.0                  # Weight for time feature (f_time)
+SCORING_W_VALUE = 8.0                 # Weight for amount feature (f_amount, based on fee rate range)
 
 
 # ==================== Fetcher Config ====================
@@ -105,7 +119,7 @@ ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY", "")
 ALCHEMY_API_KEY = os.getenv("ALCHEMY_API_KEY", "")
 INFURA_PROJECT_ID = os.getenv("INFURA_PROJECT_ID", "")
 
-# Price/Exchange rate APIs (for cross-chain value matching)
+# Price/Exchange rate APIs (for cross-chain amount matching)
 # Binance: 无需 API key，完全免费
 CRYPTOCOMPARE_API_KEY = os.getenv("CRYPTOCOMPARE_API_KEY", "")  # Optional, 备用方案
 
@@ -113,8 +127,36 @@ CRYPTOCOMPARE_API_KEY = os.getenv("CRYPTOCOMPARE_API_KEY", "")  # Optional, 备�
 # ==================== LLM Config ====================
 
 LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4o")
+LLM_MODEL_LITE = os.getenv("LLM_MODEL_LITE", "gpt-4o-mini")  # 用于简单任务，成本更低
 LLM_TEMPERATURE = 0.1  # 低温度，减少随机性，提高确定性
-LLM_MAX_TOKENS = 4096  # 最大输出 token 数
+LLM_MAX_TOKENS = 8192  # 最大输出 token 数
+
+# Per-agent model configuration
+# Each agent can have its own model override. If None, uses LLM_MODEL.
+AGENT_MODELS = {
+    "trace_orchestrator": os.getenv("AGENT_MODEL_ORCHESTRATOR", None),
+    "trace_fetcher": os.getenv("AGENT_MODEL_FETCHER", None),
+    "router": os.getenv("AGENT_MODEL_ROUTER", LLM_MODEL_LITE),  # Default to lite
+    "report": os.getenv("AGENT_MODEL_REPORT", LLM_MODEL_LITE),  # Default to lite
+}
+
+def get_agent_model(agent_name: str) -> str:
+    """Get the model for a specific agent.
+
+    Args:
+        agent_name: Name of the agent (e.g., "trace_orchestrator", "trace_fetcher")
+
+    Returns:
+        Model name to use for this agent
+    """
+    return AGENT_MODELS.get(agent_name) or LLM_MODEL
+
+# LLM Retry Config (for rate limit handling)
+LLM_MAX_RETRIES = 5  # 最大重试次数
+LLM_TIMEOUT = 120  # 单次请求超时（秒）
+LLM_RETRY_MIN_WAIT = 2  # 最小等待时间（秒）
+LLM_RETRY_MAX_WAIT = 60  # 最大等待时间（秒）
+LLM_RETRY_MULTIPLIER = 2  # 指数退避乘数
 
 
 # ==================== Supported Chains ====================
@@ -129,6 +171,7 @@ SUPPORTED_CHAINS = [
     "BTC-test",      # Bitcoin 测试网
     "DOGE",          # Dogecoin
     "LTC",           # Litecoin
+    "BCH",           # Bitcoin Cash
 
     # Ethereum 系列
     "ETH",           # Ethereum 主网
@@ -142,9 +185,64 @@ SUPPORTED_CHAINS = [
     "BASE",          # Base
 ]
 
+# Chain type classification
+UTXO_CHAINS = ["BTC", "DOGE", "LTC", "BCH"]  # UTXO-based chains
+ACCOUNT_CHAINS = ["ETH", "ARB", "OP", "MATIC", "BASE"]  # Account-based chains
+
+# Asset decimals (token precision)
+# Format: "CHAIN.ASSET" -> decimals
+# Used for converting between raw units (satoshi/wei) and human-readable units
+ASSET_DECIMALS = {
+    # Bitcoin-like native tokens (8 decimals)
+    "BTC.BTC": 8,
+    "DOGE.DOGE": 8,
+    "LTC.LTC": 8,
+    "BCH.BCH": 8,
+    # Ethereum-like native tokens (18 decimals)
+    "ETH.ETH": 18,
+    "ARB.ETH": 18,
+    "OP.ETH": 18,
+    "MATIC.MATIC": 18,
+    "BASE.ETH": 18,
+    # Common stablecoins (6 decimals)
+    "ETH.USDT": 6,
+    "ETH.USDC": 6,
+    # Wrapped tokens
+    "ETH.WETH": 18,
+    "ETH.WBTC": 8,
+}
+
+def get_asset_decimals(chain: str, asset: str = None) -> int:
+    """获取资产的 decimals，用于 raw/human 单位转换
+
+    Args:
+        chain: 链标识符 (e.g., "BTC", "ETH")
+        asset: 资产标识符，默认为链的原生代币
+
+    Returns:
+        decimals 值
+    """
+    base_chain = chain.upper().split("-")[0]
+    if asset is None:
+        asset = base_chain  # 默认原生代币
+    key = f"{base_chain}.{asset.upper()}"
+    return ASSET_DECIMALS.get(key, 8)  # 默认 8
+
+def get_asset_unit(chain: str, asset: str = None) -> float:
+    """获取资产的单位转换因子 (10^decimals)"""
+    return 10 ** get_asset_decimals(chain, asset)
+
 def validate_chain(chain: str) -> bool:
     """验证 chain 标识符是否有效"""
     return chain in SUPPORTED_CHAINS
+
+def is_utxo_chain(chain: str) -> bool:
+    """判断是否是 UTXO 链"""
+    return chain.upper().split("-")[0] in UTXO_CHAINS
+
+def is_account_chain(chain: str) -> bool:
+    """判断是否是账户模型链"""
+    return chain.upper().split("-")[0] in ACCOUNT_CHAINS
 
 
 # ==================== Logging Config ====================
@@ -157,6 +255,8 @@ LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
 DEBUG_MODE = os.getenv("DEBUG_MODE", "false").lower() == "true"
 VERBOSE_ERRORS = DEBUG_MODE  # 是否在 error 中包含完整 traceback
+# 0 = off, 1 = messages only (-v), 2 = full state (-vv)
+VERBOSE_LEVEL = int(os.getenv("VERBOSE_LEVEL", "0"))
 
 
 # ==================== v1+ Preview (not used in v0) ====================

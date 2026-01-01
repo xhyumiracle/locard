@@ -1,21 +1,22 @@
 """State schemas for BlockchainMAS LangGraph"""
 
 from src.state.graph_state import (
-    PlanStep,
-    Plan,
-    ErrorEvent,
-    BlockchainState,
-    SubgraphExecState,
+    Subgraph,
     GraphState,
     create_initial_state,
 )
 
+from src.state.tracetx_state import (
+    Finding,
+    TraceTxState,
+    state_ids_hint,
+)
+
 __all__ = [
-    "PlanStep",
-    "Plan",
-    "ErrorEvent",
-    "BlockchainState",
-    "SubgraphExecState",
+    "Subgraph",
     "GraphState",
     "create_initial_state",
+    "Finding",
+    "TraceTxState",
+    "state_ids_hint",
 ]

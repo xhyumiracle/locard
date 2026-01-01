@@ -19,12 +19,12 @@ Given src_op (a "send/receive" operation on Chain A), generate candidate dst_op 
 - F_time = exp(-dt / tau_time)
   - tau_time can be set by Link scenario: small for bridges (e.g., 30~120min), large for exchanges (e.g., 6~48h)
 
-### F_value: Value Consistency (using price/exchange rate at the time)
+### F_amount: Value Consistency (using price/exchange rate at the time)
 - vA = amountA * priceA(tA)   (denominated in USD or stablecoin)
 - vB = amountB * priceB(tB)
 - rel = |vA - vB| / max(vA, vB)
-- F_value = exp(-rel / tau_value)
-  - tau_value typically 1%~10% (depends on coin volatility & bridge fees/slippage)
+- F_amount = exp(-rel / tau_amount)
+  - tau_amount typically 1%~10% (depends on coin volatility & bridge fees/slippage)
 
 ### F_fee_slippage: Fee/Slippage Reasonability (optional but useful)
 - expected_loss = fee_bridge + relayer_fee + slippage_band (range)
@@ -65,7 +65,7 @@ Given src_op (a "send/receive" operation on Chain A), generate candidate dst_op 
 
 ```
 score_raw = w_time*F_time
-          + w_value*F_value
+          + w_amount*F_amount
           + w_fee*F_fee
           + w_round*F_rounding
           + w_tag*F_tag
@@ -80,7 +80,7 @@ confidence = sigmoid(a*(score_raw - b))
 
 ### Suggested v0 Weights (to get it running):
 - w_meta = 4.0   (with nonce/orderId strong evidence, almost locked)
-- w_value = 2.0
+- w_amount = 2.0
 - w_time  = 1.5
 - w_unique= 2.0
 - w_tag   = 1.0
@@ -101,7 +101,7 @@ confidence = sigmoid(a*(score_raw - b))
 ------------------------------------------------------------
 Just 4 features can be very effective:
 - F_meta (strong if present)
-- F_value (amount consistency at exchange rate)
+- F_amount (amount consistency at exchange rate)
 - F_time (time proximity within window)
 - F_uniqueness (ambiguity penalty)
 

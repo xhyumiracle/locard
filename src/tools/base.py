@@ -78,6 +78,11 @@ def cached(source: str = "default", model: type = None):
             # Call function and cache result
             result = func(*args, **kwargs)
 
+            # Don't cache empty results (empty list, empty dict, None)
+            if result is None or result == [] or result == {}:
+                logger.debug(f"Cache skip (empty result): {source}/{func.__name__}")
+                return result
+
             # Serialize for caching
             try:
                 # Handle Pydantic models
@@ -200,6 +205,35 @@ def with_retry(
     return decorator
 
 
+class LoggingHTTPClient:
+    """Wrapper around httpx.Client that logs all requests."""
+
+    def __init__(self, client: httpx.Client, source_name: str = "api"):
+        self._client = client
+        self._source = source_name
+
+    def _build_full_url(self, url: str, params: Optional[Dict] = None) -> str:
+        """Build full URL with query params for logging."""
+        if not params:
+            return url
+        from urllib.parse import urlencode
+        return f"{url}?{urlencode(params)}"
+
+    def get(self, url: str, **kwargs) -> httpx.Response:
+        full_url = self._build_full_url(url, kwargs.get("params"))
+        logger.info(f"HTTP Request: GET {full_url}")
+        return self._client.get(url, **kwargs)
+
+    def post(self, url: str, **kwargs) -> httpx.Response:
+        full_url = self._build_full_url(url, kwargs.get("params"))
+        logger.info(f"HTTP Request: POST {full_url}")
+        return self._client.post(url, **kwargs)
+
+    def __getattr__(self, name):
+        # Delegate other methods to underlying client
+        return getattr(self._client, name)
+
+
 class BaseAPIClient:
     """Base class for blockchain API clients."""
 
@@ -207,10 +241,14 @@ class BaseAPIClient:
     SOURCE_NAME = "unknown"
 
     def __init__(self, timeout: int = config.TOOL_TIMEOUT):
-        self.client = httpx.Client(timeout=timeout)
+        self._raw_client = httpx.Client(timeout=timeout)
+        self.client = LoggingHTTPClient(self._raw_client, self.SOURCE_NAME)
 
     def _handle_response(self, response: httpx.Response) -> dict:
         """Handle HTTP response, raising appropriate exceptions."""
+        if response.status_code == 400:
+            # Bad request (invalid params, symbol not found) - don't retry
+            raise FatalError(f"Bad request: {response.url}")
         if response.status_code == 404:
             raise FatalError(f"Resource not found: {response.url}")
         if response.status_code == 429:
