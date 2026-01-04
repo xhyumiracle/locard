@@ -1,0 +1,20 @@
+# Batch Query File for BlockchainMAS
+# Auto-generated: Top 3 ground truth examples for DOGE-BTC
+# Selected based on DISTRIBUTION_FITTING_ANALYSIS.md ideal values
+# Ideal: time_diff=762s, fee_rate=3.0%
+# Filter: amount >= 75th percentile (large amounts, less common)
+# Format: Each query has 'query' (required), 'comment' (optional), and 'metadata'
+
+queries:
+#     reason: 'Closest to ideal: time_diff=762s, fee_rate=3.0%, large amount'
+- query: What is the source transaction for this cross-chain BTC output to bc1q5tx0ay5tg8fkq9nt7kcjfrlm29ak6zwl5767vl in tx
+    D32CBAB87B463B2A0BDD8E9DDA18C010DC0971B7747D5EEDF292AAEEAE7B5CAD on BTC, given that it originates from DOGE on DOGE?
+  # comment: 'Ground Truth: EEDF181E2F7DFC1689CD902626B3B50DACD5A1D8F855250E3D487B775420B606'
+  # metadata:
+  #   thorchain_id: 49a4def238d47cd07e5b9d21794af29539e11edafcda7f1cb60e70be9a74de91
+  #   pair: DOGE-BTC
+  #   time_diff: 403
+  #   fee_rate: 0.0181
+  #   score: 0.6169
+  #   src_amount: 273500000000
+  #   reason: 'Closest to ideal: time_diff=762s, fee_rate=3.0%, large amount'

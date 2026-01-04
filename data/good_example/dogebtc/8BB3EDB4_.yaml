@@ -1,0 +1,20 @@
+# Batch Query File for BlockchainMAS
+# Format: Each query has 'query' (required) and 'comment' (optional)
+# Use '#' at the start of a line to comment out queries
+
+queries:
+# - query: |
+#     please help me to trace the source of this BTC: in tx 749534249453B75EE5F193B8B71629C642B8AD3CF772212D518468615231AE1B, there's a vout to bc1qzjuhrwr50sd7njkf40qa469n38sl25mg9lxdvp, hint: it may come from doge coin
+#   comment: "Ground Truth: Should identify DOGE tx 71B1ED1276B53803272A0E2F0860961F4BE0B49CCF72415210BB2EEAAFF6C3D0"
+
+- query: What is the source transaction for this cross-chain BTC output to bc1qkx8m3f9jfvmumdqxjrqarz7hv8vg6p398us92f in tx
+    8BB3EDB4F0AC314C9A78EAEF816B061ACE8CB70D951F2FCAD5696D65A4D67333 on BTC, given that it originates from DOGE on DOGE?
+  comment: 'Ground Truth: 4446318883ACD7F1A782B1FFCF4780B9BD1A80E81AB55BFBD221BCC5243A70A0'
+  metadata:
+    thorchain_id: ada1fe0e44f6d56a6df50be7ccb6c058471dc53846391d293c0dc0a9858868f4
+    pair: DOGE-BTC
+    time_diff: 937
+    fee_rate: 0.0174
+    score: 0.4784
+    src_amount: 8131956344400
+    reason: 'Closest to ideal: time_diff=762s, fee_rate=3.0%, large amount'
