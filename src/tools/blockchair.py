@@ -152,8 +152,8 @@ class BlockchairClient(BaseAPIClient):
                 block_time=block_time,
                 sender=tx_info.get("sender"),
                 recipient=tx_info.get("recipient"),
-                amount=tx_info.get("value", 0) / unit if tx_info.get("value") else 0,
-                fee=tx_info.get("fee", 0) / unit if tx_info.get("fee") else 0,
+                amount=int(tx_info.get("value", 0)) / unit if tx_info.get("value") else 0,
+                fee=int(tx_info.get("fee", 0)) / unit if tx_info.get("fee") else 0,
                 meta={
                     "gas_used": tx_info.get("gas_used"),
                     "gas_price": tx_info.get("gas_price"),

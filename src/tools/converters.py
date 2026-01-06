@@ -8,7 +8,7 @@ import time
 from typing import Dict
 
 from config import get_asset_decimals
-from src.tools.models import UtxoTx, UtxoOutput, AccountTx
+from src.tools.models import UtxoTx, UtxoOutput, AccountTx, EthCall
 from src.models.core import (
     Transfer, Operation, AccountIdentifier, TxStatus
 )
@@ -152,6 +152,64 @@ def account_tx_to_transfer(tx: AccountTx, source: str = "unknown") -> Transfer:
         operations=operations
     )
 
+def eth_call_to_transfer(call: EthCall, source: str = "unknown") -> Transfer:
+    """Convert EthCall to lightweight Transfer model.
+
+    Creates a Transfer with single or dual operations representing the internal call.
+    Similar to utxo_output_to_transfer - represents a single internal transfer.
+
+    For cross-chain matching, we typically only need the recipient operation (incoming),
+    but we include both sender and recipient when available for completeness.
+
+    Args:
+        call: ETH internal call/transfer
+        source: Data source name (e.g., "blockchair")
+    """
+    asset = call.chain  # Always "ETH"
+    decimals = get_asset_decimals(call.chain)
+
+    # Use call index as the operation identifier
+    # For internal calls, we use vout (recipient) as the primary operation
+    # since we're matching incoming transfers in cross-chain scenarios
+    operations: Dict[str, Operation] = {}
+
+    if call.recipient:
+        # Incoming operation - this is what we match against dst in cross-chain
+        op_id = f"vout:{call.index}"
+        op_in = Operation(
+            op_id=op_id,
+            account=AccountIdentifier(address=call.recipient),
+            amount=call.amount,
+            asset=asset,
+            decimals=decimals,
+            spent_coin_id=None
+        )
+        operations[op_id] = op_in
+
+    if call.sender:
+        # Outgoing operation - included for completeness
+        op_id = f"vin:{call.index}"
+        op_out = Operation(
+            op_id=op_id,
+            account=AccountIdentifier(address=call.sender),
+            amount=call.amount,
+            asset=asset,
+            decimals=decimals,
+            spent_coin_id=None
+        )
+        operations[op_id] = op_out
+
+    return Transfer(
+        txid=call.txid,
+        chain=call.chain,
+        block_time=call.block_time,
+        status="confirmed",
+        block_height=None,
+        block_hash=None,
+        operations=operations,
+        type="account"  # Internal calls are part of account model
+    )
+
 def dict_to_transfer(data: dict) -> Transfer:
     """Convert dict to Transfer model."""
 
@@ -164,6 +222,11 @@ def dict_to_transfer(data: dict) -> Transfer:
     if "n" in data:
         output = UtxoOutput(**data)
         return utxo_output_to_transfer(output)
+
+    # Check if it's EthCall (has 'depth' and 'index' fields - unique to internal calls)
+    if "depth" in data and "index" in data:
+        call = EthCall(**data)
+        return eth_call_to_transfer(call)
 
     # Check if it's AccountTx (has 'sender' or 'recipient')
     if "sender" in data or "recipient" in data:
