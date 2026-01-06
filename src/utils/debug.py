@@ -4,14 +4,15 @@ Debug utilities for BlockchainMAS.
 Provides verbose logging for agent input/output to help with debugging.
 
 Verbosity levels:
-  -v  (level 1): Print LLM messages for each agent
-  -vv (level 2): Print full state (truncated)
+  -v  (level 1): Log agent messages at INFO level
+  -vv (level 2): Log detailed state at DEBUG level
 """
 
 import json
+import logging
 from typing import List, Any
 
-import config
+logger = logging.getLogger(__name__)
 
 
 def _format_messages(messages: list, max_len: int = None) -> str:
@@ -81,62 +82,44 @@ def format_label(label: str, pad_char: str = '=', length: int = 60) -> str:
     return f"{pad_char * left_padding}{label}{pad_char * right_padding}"
 
 
-def print_agent_begin(node_name: str):
-    if config.VERBOSE_LEVEL < 1:
-        return
-    label = f"[{node_name}] AGENT BEGIN"
-    print(f"\n{format_label(label, '=', 60)}")
-
-
-def print_agent_end(node_name: str):
-    if config.VERBOSE_LEVEL < 1:
-        return
-    label = f"[{node_name}] AGENT END"
-    print(f"\n{format_label(label, '=', 60)}")
-
 def print_messages(node_name: str, section: str, messages: List[Any] = None):
     """
-    Print messages for debugging.
+    Log messages for debugging.
 
     Args:
         node_name: Name of the node (e.g., "router", "trace_orchestrator")
         section: e.g. "Agent Output" or "Agent Input"
         messages: Optional full message history (shows tool calls in execution order)
     """
-    if config.VERBOSE_LEVEL < 1:
-        return
-
     _m = f"[{node_name}] {section}"
-    print(f"\n{format_label(_m, '-', 60)}")
+    logger.debug(f"\n{format_label(_m, '-', 60)}")
 
     if messages:
-        print(_format_messages(messages))
-        print()
+        logger.debug(_format_messages(messages))
+        logger.debug("")
 
-    print(f"{'-'*60}\n")
+    logger.debug(f"{'-'*60}\n")
     
 def print_structure_output(node_name: str, output: Any):
     """
-    Print structured output for debugging.
+    Log structured output for debugging.
 
     Args:
         node_name: Name of the node (e.g., "router", "trace_orchestrator")
         output: Agent output (structured or raw)
     """
-    if config.VERBOSE_LEVEL < 1:
-        return
     if output is None:
         return
 
     _m = f"[{node_name}] Structured Output"
-    print(f"\n{format_label(_m, '-', 60)}")
+    logger.debug(f"\n{format_label(_m, '-', 60)}")
 
     if isinstance(output, dict):
         for k, v in output.items():
-            print(f"  {k}: {v}")
+            logger.debug(f"  {k}: {v}")
     else:
-        print(f"  {output}")
-    print(f"{'-'*60}\n")
+        logger.debug(f"  {output}")
+    logger.debug(f"{'-'*60}\n")
 
 
 
