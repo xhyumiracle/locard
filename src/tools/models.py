@@ -80,10 +80,28 @@ class AccountTx(BaseModel):
     fee: float = 0
     meta: Dict[str, Any] = {}  # gas_used, gas_price, etc.
 
+
+class EthCall(BaseModel):
+    """Standalone ETH internal call/transaction (from calls search).
+
+    Similar to UtxoOutput, this is independent and contains all info
+    needed for cross-chain matching of ETH internal transfers.
+    """
+    chain: str  # Always "ETH"
+    txid: str   # Parent transaction hash
+    index: str  # Call index like "0", "0.0", "0.0.0"
+    depth: int  # Call depth (0 = top level)
+    call_type: str  # "call", "delegatecall", "staticcall", etc
+    sender: Optional[str] = None
+    recipient: Optional[str] = None
+    amount: float = 0  # In ETH (not wei)
+    transferred: bool = True  # Whether ETH was actually transferred
+    block_time: Optional[int] = None
+
 class PriceRange(BaseModel):
     price_min: float
     price_max: float
     via: Optional[str]
 
 
-ToolTx = Union[UtxoTx, AccountTx, UtxoOutput]
+ToolTx = Union[UtxoTx, AccountTx, UtxoOutput, EthCall]

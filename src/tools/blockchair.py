@@ -15,7 +15,7 @@ from langchain_core.tools import tool
 import config
 from config import is_utxo_chain, get_asset_unit
 from src.tools.base import BaseAPIClient, with_retry, cached
-from src.tools.models import UtxoTx, UtxoOutput, AccountTx, Vin, Vout
+from src.tools.models import UtxoTx, UtxoOutput, AccountTx, Vin, Vout, EthCall
 from src.tools.filters import filter_txs, filter_tx_by_address_direction
 
 
@@ -329,6 +329,93 @@ class BlockchairClient(BaseAPIClient):
 
     @cached("blockchair")
     @with_retry()
+    def search_calls(
+        self,
+        chain: str,
+        min_timestamp: int,
+        max_timestamp: int,
+        recipient: str = "",
+        sender: str = "",
+        min_amount: float = 0,
+        max_amount: float = 0,
+        transferred_only: bool = True,
+        limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        """
+        Search internal transactions (calls) by time, address, and amount.
+
+        Only supported for Ethereum mainnet and Goerli testnet.
+
+        IMPORTANT: Value filtering uses ETH unit (not wei) in API queries.
+        - Query: value(10) means 10 ETH
+        - Response: "value": "10000000000000000000" (wei)
+
+        Args:
+            chain: Chain (ETH or ethereum/testnet for Goerli)
+            min_timestamp: Start time (Unix)
+            max_timestamp: End time (Unix)
+            recipient: Recipient address (recommended for performance)
+            sender: Sender address
+            min_amount: Min amount in ETH (e.g., 9.5)
+            max_amount: Max amount in ETH (e.g., 10.5)
+            transferred_only: Only return calls with actual ETH transfer
+            limit: Max results
+
+        Returns:
+            List of call dicts with sender, recipient, value (wei), time, etc.
+        """
+        chain_name = CHAIN_MAP.get(chain.upper(), chain.lower())
+
+        # Build time filter
+        min_time_str = datetime.fromtimestamp(min_timestamp, tz=timezone.utc).strftime("%Y-%m-%d+%H:%M:%S")
+        max_time_str = datetime.fromtimestamp(max_timestamp, tz=timezone.utc).strftime("%Y-%m-%d+%H:%M:%S")
+        query_parts = [f"time({min_time_str}..{max_time_str})"]
+
+        # Address filter (at least one recommended)
+        if recipient:
+            query_parts.append(f"recipient({recipient.lower()})")
+        elif sender:
+            query_parts.append(f"sender({sender.lower()})")
+
+        # Value filter - use ETH directly (NOT wei!)
+        if min_amount > 0 or max_amount > 0:
+            if max_amount > 0:
+                query_parts.append(f"value({min_amount}..{max_amount})")
+            else:
+                query_parts.append(f"value({min_amount}..)")
+
+        # Only actual transfers
+        if transferred_only:
+            query_parts.append("transferred(true)")
+
+        query = f"q={','.join(query_parts)}&s=time(desc)"
+
+        # Fetch with pagination
+        all_calls = []
+        offset = 0
+        api_limit = min(limit, 100)
+
+        while len(all_calls) < limit:
+            url = f"{self.BASE_URL}/{chain_name}/calls?{query}&limit={api_limit}&offset={offset}"
+            url = self._add_key(url)
+
+            response = self.client.get(url)
+            data = self._handle_response(response)
+            calls = data.get("data", [])
+
+            if not calls:
+                break
+
+            all_calls.extend(calls)
+            offset += len(calls)
+
+            if len(calls) < api_limit:
+                break
+
+        return all_calls[:limit]
+
+    @cached("blockchair")
+    @with_retry()
     def get_block(self, chain: str, block_id: str, limit: int = 100) -> Dict[str, Any]:
         """Fetch block dashboard with transaction list."""
         chain_name = CHAIN_MAP.get(chain.upper(), chain.lower())
@@ -563,6 +650,100 @@ def search_utxo_outputs_blockchair(
             block_time=client._parse_time(out.get("time")),
         )
         results.append(output.model_dump())
+
+    return results
+
+
+@tool
+def search_eth_calls_blockchair(
+    min_timestamp: int = 0,
+    max_timestamp: int = 0,
+    recipient: str = "",
+    sender: str = "",
+    min_amount: float = 0,
+    max_amount: float = 0,
+    limit: int = 100
+) -> List[dict]:
+    """
+    Search ETH internal transactions (calls) by time, address, and amount. Only for ETH mainnet. Paid API.
+
+    This is a search_txs category tool - it searches and filters internal calls/transfers.
+    Unlike ETH transactions which show only top-level transfers, this shows ALL internal
+    transfers including those from smart contracts (e.g., LiFi, THORChain Router, etc.).
+    Best for cross-chain tracing where ETH transfers happen through intermediary contracts.
+
+    IMPORTANT: Value amounts use ETH unit (not wei):
+    - Query: value(10) = 10 ETH
+    - Response: "value": "10000000000000000000" (wei, converted to ETH in result)
+
+    Args:
+        min_timestamp: Start time (Unix), 0 = no lower bound
+        max_timestamp: End time (Unix), 0 = no upper bound
+        recipient: Recipient address (strongly recommended for performance)
+        sender: Sender address (use if recipient unknown)
+        min_amount: Min transfer amount in ETH (e.g., 9.5), 0 = no filter
+        max_amount: Max transfer amount in ETH (e.g., 10.5), 0 = no upper bound
+        limit: Max results (default 100, supports pagination internally)
+
+    Returns:
+        List[EthCall]: List of internal calls with sender, recipient, amount (ETH), time.
+        Each call represents an actual ETH transfer at any call depth.
+
+    Example:
+        # Find 10 ETH transfers through LiFi to THORChain vault
+        search_eth_calls_blockchair(
+            recipient="0xd03d56ef7d11a1a5a0933c1d524ff0bc1e916c98",
+            min_timestamp=swap_time - 600,
+            max_timestamp=swap_time + 600,
+            min_amount=9.5,
+            max_amount=10.5,
+            limit=100
+        )
+    """
+    if min_timestamp <= 0 and max_timestamp <= 0:
+        raise ValueError("At least one of min_timestamp or max_timestamp must be specified")
+
+    if not recipient and not sender:
+        raise ValueError(
+            "Must specify either recipient or sender address for performance. "
+            "Searching without address filter would return too many results."
+        )
+
+    if not config.BLOCKCHAIR_API_KEY:
+        raise ValueError("Blockchair API key required. Set BLOCKCHAIR_API_KEY.")
+
+    client = BlockchairClient()
+
+    calls_raw = client.search_calls(
+        chain="ETH",
+        min_timestamp=min_timestamp,
+        max_timestamp=max_timestamp,
+        recipient=recipient,
+        sender=sender,
+        min_amount=min_amount,
+        max_amount=max_amount,
+        transferred_only=True,
+        limit=limit
+    )
+
+    unit = get_asset_unit("ETH")  # 10^18 wei per ETH
+
+    # Convert to EthCall model
+    results = []
+    for call in calls_raw:
+        eth_call = EthCall(
+            chain="ETH",
+            txid=call.get("transaction_hash"),
+            index=call.get("index", ""),
+            depth=call.get("depth", 0),
+            call_type=call.get("type", "call"),
+            sender=call.get("sender"),
+            recipient=call.get("recipient"),
+            amount=int(call.get("value", 0)) / unit,  # Convert wei to ETH
+            transferred=call.get("transferred", True),
+            block_time=client._parse_time(call.get("time")),
+        )
+        results.append(eth_call.model_dump())
 
     return results
 

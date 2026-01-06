@@ -18,6 +18,7 @@ from src.tools.blockchair import (
     get_addresses_txs_blockchair,
     search_txs_blockchair,
     search_utxo_outputs_blockchair,
+    search_eth_calls_blockchair,
     get_block_txs_blockchair,
     get_address_blockchair,
 )
@@ -42,6 +43,7 @@ def get_trace_tools() -> List[BaseTool]:
         search_txs_doge_electrs,   # DOGE only - free (scans blocks)
         search_txs_blockchair,     # Multi-chain (paid) - filters by tx total
         search_utxo_outputs_blockchair,  # Multi-chain (paid) - filters by individual output amount
+        search_eth_calls_blockchair,     # ETH only (paid) - filters ETH internal transfers
 
         # Price for cross-chain amount matching
         get_price_binance,
