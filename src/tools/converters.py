@@ -73,8 +73,9 @@ def utxo_output_to_transfer(output: UtxoOutput, source: str = "unknown") -> Tran
     Creates a Transfer with only the single vout operation.
     Used for output search results where we don't have full tx data.
 
-    Transfer.id = "{txid}:vout:{n}" to distinguish from UtxoTx (id=txid)
-    and avoid collision when same tx has multiple outputs as candidates.
+    Transfer.txid is the transaction hash only (no :vout:n suffix).
+    Different outputs are distinguished by Operation.op_id (vout:0, vout:1, etc).
+    CrossChainLink.id combines both txid and op_id to avoid collisions.
 
     Args:
         output: Standalone UTXO output
@@ -95,7 +96,7 @@ def utxo_output_to_transfer(output: UtxoOutput, source: str = "unknown") -> Tran
     )
 
     return Transfer(
-        txid=f"{output.txid}:vout:{output.n}",
+        txid=output.txid,  # Only the transaction hash, no :vout:n suffix
         chain=output.chain,
         block_time=output.block_time,
         status="confirmed",
@@ -150,3 +151,23 @@ def account_tx_to_transfer(tx: AccountTx, source: str = "unknown") -> Transfer:
         block_hash=None,
         operations=operations
     )
+
+def dict_to_transfer(data: dict) -> Transfer:
+    """Convert dict to Transfer model."""
+
+    # Check if it's UtxoTx (has 'vin' or 'vout' list)
+    if "vin" in data or "vout" in data:
+        tx = UtxoTx(**data)
+        return utxo_tx_to_transfer(tx)
+
+    # Check if it's UtxoOutput (has 'n' field for output index)
+    if "n" in data:
+        output = UtxoOutput(**data)
+        return utxo_output_to_transfer(output)
+
+    # Check if it's AccountTx (has 'sender' or 'recipient')
+    if "sender" in data or "recipient" in data:
+        tx = AccountTx(**data)
+        return account_tx_to_transfer(tx)
+
+    raise ValueError(f"Invalid data type: {type(data)}")

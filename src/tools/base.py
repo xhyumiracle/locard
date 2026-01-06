@@ -241,7 +241,15 @@ class BaseAPIClient:
     SOURCE_NAME = "unknown"
 
     def __init__(self, timeout: int = config.TOOL_TIMEOUT):
-        self._raw_client = httpx.Client(timeout=timeout)
+        # Add User-Agent to avoid API rejections (some services require it)
+        headers = {
+            "User-Agent": "Mozilla/5.0 (compatible; BlockchainClient/1.0)"
+        }
+        self._raw_client = httpx.Client(
+            timeout=timeout,
+            headers=headers,
+            follow_redirects=True
+        )
         self.client = LoggingHTTPClient(self._raw_client, self.SOURCE_NAME)
 
     def _handle_response(self, response: httpx.Response) -> dict:
@@ -251,9 +259,30 @@ class BaseAPIClient:
             raise FatalError(f"Bad request: {response.url}")
         if response.status_code == 404:
             raise FatalError(f"Resource not found: {response.url}")
+        if response.status_code == 418:
+            # HTTP 418 "I'm a teapot" - Binance uses this for rate limiting/IP bans
+            record_rate_limit(self.SOURCE_NAME)
+            raise TransientError("Rate limit exceeded (418: IP restricted or WAF block)")
         if response.status_code == 429:
             # Track rate limits and stop if too many
             record_rate_limit(self.SOURCE_NAME)
+
+            # Check for Retry-After header (standard HTTP)
+            retry_after = response.headers.get('retry-after') or response.headers.get('Retry-After')
+            if retry_after:
+                try:
+                    wait_seconds = float(retry_after)
+                    # Cap at 5 minutes to avoid hanging
+                    wait_seconds = min(wait_seconds, 300)
+                    logger.warning(
+                        f"{self.SOURCE_NAME} rate limited - API suggests retry after {wait_seconds}s"
+                    )
+                    time.sleep(wait_seconds)
+                    raise TransientError(f"Rate limit (waited {wait_seconds:.1f}s as suggested by API)")
+                except (ValueError, TypeError):
+                    # Retry-After might be HTTP-date format, ignore for now
+                    pass
+
             raise TransientError("Rate limit exceeded")
         if response.status_code >= 500:
             raise TransientError(f"Server error: {response.status_code}")

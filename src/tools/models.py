@@ -10,7 +10,7 @@ Design principles:
 - Human-readable units (BTC not satoshi, ETH not wei)
 """
 
-from typing import Optional, List, Dict, Any, Literal
+from typing import Optional, List, Dict, Any, Literal, Union
 from pydantic import BaseModel
 
 
@@ -19,7 +19,6 @@ from pydantic import BaseModel
 # - "pending": in mempool, not yet mined
 # - "failed": included in block but execution failed (e.g., ETH reverted)
 TxStatus = Literal["confirmed", "pending", "failed"]
-
 
 # ==================== UTXO Transaction ====================
 
@@ -85,3 +84,6 @@ class PriceRange(BaseModel):
     price_min: float
     price_max: float
     via: Optional[str]
+
+
+ToolTx = Union[UtxoTx, AccountTx, UtxoOutput]
