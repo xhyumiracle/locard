@@ -69,7 +69,7 @@ def calculate_hit_rate(
         src_transfer = candidate.get("src_transfer", {})
         src_txid = normalize_txhash(src_transfer.get("txid", ""))
 
-        logger.debug(f"Candidate {i}: src_txid={src_txid[:16]}... vs gt={gt_normalized[:16]}...")
+        # logger.debug(f"Candidate {i}: src_txid={src_txid[:16]}... vs gt={gt_normalized[:16]}...")
 
         if src_txid == gt_normalized:
             predicted_rank = i
