@@ -28,4 +28,3 @@ Return a FetchReport. Rules:
   - `kind="search_txs"`: Filter/search by conditions
   - `kind="price"`: Price data queries
 - **MUST fetch with the EXACT time/amount windows specified in the task brief**
-- DO NOT say anything after tool calls

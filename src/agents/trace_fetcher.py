@@ -94,11 +94,20 @@ class TraceFetcherAgent:
         #     tools.append(create_state_lookup_tool(state))
 
         # Create agent with current tools
+        # Tuple format: (system_prompt_for_structured_response, schema)
+        # This prompt is ONLY used in the final structured response generation call
+        # to suppress verbose text and save output tokens (4x more expensive than input)
         agent = create_react_agent(
             self.llm,
             tools,
             prompt=self.prompt,
-            response_format=FetchReportSchema
+            response_format=(
+                "Output ONLY the JSON object matching the schema. "
+                "DO NOT wrap in markdown (no ```json). "
+                "DO NOT add explanatory text. "
+                "Just the raw JSON.",
+                FetchReportSchema
+            )
         )
 
         # Build input with optional state hint
