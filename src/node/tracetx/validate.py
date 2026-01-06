@@ -12,7 +12,6 @@ from typing import List
 from src.state.tracetx_state import TraceTxState, get_all_findings
 from src.models.core import CrossChainLink, Operation, Transfer, DstInfo, SrcInfo
 from src.models.finding import Finding, find_by_id, find_matching_price
-from src.tools.models import AccountTx, ToolTx, UtxoOutput, UtxoTx, PriceRange
 import src.tools.converters as converter
 import config
 
