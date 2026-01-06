@@ -12,11 +12,12 @@ Responsibilities:
 import logging
 from typing import Dict, List, Literal, Optional
 
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
 from pydantic import BaseModel, Field
 
 import config
 from src.agents.prompts import load_prompt
+from src.agents.tool_agent import create_tool_agent
 from src.state.tracetx_state import TraceTxState
 from src.models.core import (
     DstInfoSchema, SrcInfoSchema,
@@ -25,6 +26,11 @@ from src.models.core import (
 from src.models.finding import format_finding_data, format_findings
 from src.utils.debug import print_messages, print_structure_output
 from src.utils.llm import create_chat_openai_with_retry
+from src.tools.calculators import (
+    calculate_search_time_window,
+    calculate_search_amount_window,
+    calculate_check_time_windows
+)
 
 logger = logging.getLogger(__name__)
 
@@ -60,10 +66,21 @@ class TraceOrchestratorAgent:
     """Trace Orchestrator Agent that controls the tracing workflow."""
 
     def __init__(self):
-        llm = create_chat_openai_with_retry(
+        base_llm = create_chat_openai_with_retry(
             model=config.get_agent_model("trace_orchestrator")
         )
-        self.llm = llm.with_structured_output(TraceOrchestratorOutput)
+        # Prepare calculator tools (these are already @tool decorated)
+        calculator_tools = [
+            calculate_search_time_window,
+            calculate_search_amount_window,
+            calculate_check_time_windows
+        ]
+        # Create tool agent with structured output
+        self.agent = create_tool_agent(
+            llm=base_llm,
+            tools=calculator_tools,
+            output_schema=TraceOrchestratorOutput
+        )
 
     def process(
         self,
@@ -72,7 +89,10 @@ class TraceOrchestratorAgent:
         messages = self._build_messages(state)
 
         print_messages("trace_orchestrator", "Input", messages)
-        result = self.llm.invoke(messages)
+
+        # Invoke tool agent (handles tool calling + structured output)
+        result = self.agent.invoke(messages)
+
         print_messages("trace_orchestrator", "Output", result)
         return result
 
