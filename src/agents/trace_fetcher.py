@@ -102,10 +102,10 @@ class TraceFetcherAgent:
             tools,
             prompt=self.prompt,
             response_format=(
-                "Output ONLY the JSON object matching the schema. "
-                "DO NOT wrap in markdown (no ```json). "
-                "DO NOT add explanatory text. "
-                "Just the raw JSON.",
+                "CRITICAL INSTRUCTION: Output ONLY the raw JSON object, nothing else. "
+                "STRICTLY FORBIDDEN: Any text before/after JSON, markdown (```json), code blocks, explanations, formatting, whitespace. "
+                "REQUIRED FORMAT: Single-line compact JSON exactly matching schema. "
+                "VIOLATION = FAILURE.",
                 FetchReportSchema
             )
         )
