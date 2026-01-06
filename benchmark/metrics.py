@@ -106,19 +106,26 @@ def aggregate_metrics(results: List[MetricResult]) -> Dict[str, Any]:
     Returns:
         Dict with aggregated metrics:
         - hit_rates: {k: hit_rate} for each k value
+        - hit_counts: {k: hit_count} for each k value
         - mrr: Mean Reciprocal Rank
         - found_rate: Percentage of queries where ground truth was found
         - avg_initial_candidates: Average number of initial candidates per query (before exclusion)
         - avg_valid_candidates: Average number of valid candidates per query (after exclusion)
+        - rank_details: List of "{rank}/{valid_candidates}" strings for each query
+        - rank_stats: Statistics about ranks (mean, median, min, max)
     """
     if not results:
         return {
             "hit_rates": {},
+            "hit_counts": {},
             "mrr": 0.0,
             "found_rate": 0.0,
             "avg_initial_candidates": 0.0,
             "avg_valid_candidates": 0.0,
-            "total_queries": 0
+            "total_queries": 0,
+            "found_count": 0,
+            "rank_details": [],
+            "rank_stats": {}
         }
 
     total_queries = len(results)
@@ -129,10 +136,12 @@ def aggregate_metrics(results: List[MetricResult]) -> Dict[str, Any]:
         k_values.update(result["hit_at_k"].keys())
     k_values = sorted(k_values)
 
-    # Calculate hit rates for each k
+    # Calculate hit rates and counts for each k
     hit_rates = {}
+    hit_counts = {}
     for k in k_values:
         hits = sum(1 for r in results if r["hit_at_k"].get(k, False))
+        hit_counts[k] = hits
         hit_rates[k] = hits / total_queries
 
     # Calculate MRR (Mean Reciprocal Rank)
@@ -153,14 +162,42 @@ def aggregate_metrics(results: List[MetricResult]) -> Dict[str, Any]:
     avg_initial_candidates = sum(r["total_candidates"] for r in results) / total_queries
     avg_valid_candidates = sum(r["valid_candidates"] for r in results) / total_queries
 
+    # Collect rank details: "{rank}/{valid_candidates}" for each query
+    rank_details = []
+    valid_ranks = []  # Only ranks that were found
+    for result in results:
+        rank = result["predicted_rank"]
+        valid_cands = result["valid_candidates"]
+        if rank is not None:
+            rank_details.append(f"{rank}/{valid_cands}")
+            valid_ranks.append(rank)
+        else:
+            rank_details.append(f"NOT_FOUND/{valid_cands}")
+
+    # Calculate rank statistics (only for found queries)
+    rank_stats = {}
+    if valid_ranks:
+        valid_ranks_sorted = sorted(valid_ranks)
+        rank_stats = {
+            "mean": sum(valid_ranks) / len(valid_ranks),
+            "median": valid_ranks_sorted[len(valid_ranks_sorted) // 2] if len(valid_ranks_sorted) % 2 == 1
+                      else (valid_ranks_sorted[len(valid_ranks_sorted) // 2 - 1] + valid_ranks_sorted[len(valid_ranks_sorted) // 2]) / 2,
+            "min": min(valid_ranks),
+            "max": max(valid_ranks),
+            "count": len(valid_ranks)
+        }
+
     return {
         "hit_rates": hit_rates,
+        "hit_counts": hit_counts,
         "mrr": mrr,
         "found_rate": found_rate,
         "avg_initial_candidates": avg_initial_candidates,
         "avg_valid_candidates": avg_valid_candidates,
         "total_queries": total_queries,
-        "found_count": found_count
+        "found_count": found_count,
+        "rank_details": rank_details,
+        "rank_stats": rank_stats
     }
 
 

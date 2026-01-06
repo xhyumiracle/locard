@@ -29,37 +29,38 @@ def main():
         epilog="""
 Examples:
   # Run all three modes (default: candidate -> score -> evaluate)
-  python -m benchmark --yaml data/queries.yaml --output results/exp1
+  python -m benchmark --yaml data/queries.yaml --work-dir results/exp1
 
   # Run only first query (offset=0, limit=1)
-  python -m benchmark --yaml data/queries.yaml --output results/exp1 --limit 1
+  python -m benchmark --yaml data/queries.yaml --work-dir results/exp1 --limit 1
 
   # Run queries 5-9 (offset=5, limit=5)
-  python -m benchmark --yaml data/queries.yaml --output results/exp1 --offset 5 --limit 5
+  python -m benchmark --yaml data/queries.yaml --work-dir results/exp1 --offset 5 --limit 5
 
   # Run only candidate extraction with verbose logging
-  python -m benchmark --yaml data/queries.yaml --output results/exp1 --modes candidate -v
+  python -m benchmark --yaml data/queries.yaml --work-dir results/exp1 --modes candidate -v
 
-  # Run scoring from existing candidate_cclinks.ndjson (debug mode)
-  python -m benchmark --yaml data/queries.yaml --output results/exp1 --modes score -vv
+  # Run scoring from existing candidates (no --yaml needed)
+  python -m benchmark --work-dir results/exp1 --modes score --force -v
 
-  # Re-evaluate existing score_table.ndjson with new metrics
-  python -m benchmark --yaml data/queries.yaml --output results/exp1 --modes evaluate
+  # Re-evaluate with new metrics (needs --yaml for ground truth)
+  python -m benchmark --yaml data/queries.yaml --work-dir results/exp1 --modes evaluate --force
         """
     )
 
     parser.add_argument(
         "--yaml",
         type=str,
-        required=True,
-        help="Path to YAML file containing queries"
+        required=False,
+        help="Path to YAML file containing queries (required for candidate/evaluate modes)"
     )
 
     parser.add_argument(
-        "--output",
+        "--work-dir",
         type=str,
         required=True,
-        help="Output directory for results (must be empty or non-existent)"
+        help="Working directory (candidate: create & write, score/evaluate: read & write in-place)",
+        dest="work_dir"
     )
 
     parser.add_argument(
@@ -98,6 +99,12 @@ Examples:
         help="Suppress progress output (only errors)"
     )
 
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Force overwrite existing results (only for score/evaluate modes, candidate never overwrites)"
+    )
+
     args = parser.parse_args()
 
     # Override VERBOSE_LEVEL from command line args (highest priority)
@@ -115,21 +122,35 @@ Examples:
     )
     config.setup_logging()  # Apply namespace-specific levels for level 2
 
-    # Validate paths
-    yaml_path = Path(args.yaml)
-    if not yaml_path.exists():
-        print(f"Error: YAML file not found: {yaml_path}")
-        sys.exit(1)
+    # Determine which modes need yaml
+    modes = args.modes or ["candidate", "score", "evaluate"]
+    modes_need_yaml = {"candidate", "evaluate"}
+    needs_yaml = any(mode in modes_need_yaml for mode in modes)
+
+    # Validate yaml path if needed
+    yaml_path = None
+    if needs_yaml:
+        if not args.yaml:
+            print(f"Error: --yaml is required for modes: {', '.join(set(modes) & modes_need_yaml)}")
+            sys.exit(1)
+        yaml_path = Path(args.yaml)
+        if not yaml_path.exists():
+            print(f"Error: YAML file not found: {yaml_path}")
+            sys.exit(1)
+    elif args.yaml:
+        # Warn if yaml provided but not needed
+        print(f"Warning: --yaml provided but not needed for score-only mode (ignored)")
 
     # Run benchmark
     try:
         run_benchmark(
-            yaml_path=str(yaml_path),
-            output_dir=args.output,
-            modes=args.modes,
+            yaml_path=str(yaml_path) if yaml_path else None,
+            output_dir=args.work_dir,
+            modes=modes,
             limit=args.limit,
             offset=args.offset,
-            verbose=not args.quiet
+            verbose=not args.quiet,
+            force=args.force
         )
         sys.exit(0)
     except Exception as e:
