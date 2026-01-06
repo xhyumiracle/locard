@@ -8,44 +8,61 @@ Responsibilities:
 - Return structured findings
 """
 
-from typing import List, Literal, Optional, Dict, Any
-from typing_extensions import TypedDict
+import logging
+from typing import List, Optional, Dict, Any, Literal
 
 from langchain_core.messages import HumanMessage
 from langgraph.prebuilt import create_react_agent
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 import config
 from src.state.tracetx_state import state_ids_hint, TraceTxState
-from src.models.finding import Finding as FindingDict
+from src.models.finding import Finding as FindingDict, build_finding_id, get_finding_kinds_hint
 from src.tools.registry import get_trace_fetcher_tools
 from src.tools.state_tools import create_state_lookup_tool
 from src.agents.prompts import load_prompt
 from src.utils.debug import print_messages, print_structure_output
 from src.utils.llm import create_chat_openai_with_retry
+from src.utils.string import is_numeric_like
 
 
 # ==================== Structured Output Schema (Pydantic) ====================
 
 class FindingSchema(BaseModel):
     """A single finding (one per tool call)."""
-    kind: str = Field(description="tx (single tx fetch), address_txs (address history), search_txs (search/filter outputs/txs), or price")
-    tool_name: str = Field(description="Exact function name you called (must match tool call)")
-    result_hint: List[str] = Field(
-        default_factory=list,
-        description="Minimum keywords from tool RESULT (not args) to distinguish this call from others of same tool. "
-                    "Only needed if you called the same tool multiple times. Use shortest unique identifiers (e.g., txid prefix)."
+    model_config = ConfigDict(extra='forbid')
+
+    kind: Literal["get_tx", "price", "search_txs"] = Field(
+        description="Finding kind. Choose based on query method:\n"
+                    "- get_tx: Direct fetch BY tx hash(es)\n"
+                    "- price: Price data query\n"
+                    "- search_txs: Search/filter txs by conditions"
     )
-    rationale: str = Field(description="Why this finding is relevant")
+    tool_name: str = Field(
+        description="Exact TOOL NAME you called (must match tool call). "
+                    "INVALID: state_lookup, or any string containing ':'"
+    )
+    tool_args_hint: List[str] = Field(
+        default_factory=list,
+        description="Extract VALUES from YOUR tool call args (NOT task brief). "
+                    "Examples: ['1700001234', '1700005678'] for timestamps, ['BTC', 'ETH'] for coins. "
+                    "ALL VALUES should be exactly one of your actual tool call args"
+                    "DO NOT include any words from task brief, NO 'out', NO 'direction'"
+    )
 
 
 class FetchReportSchema(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
     # task: str = Field(description="Echo of the original task brief")
     findings: List[FindingSchema] = Field(default_factory=list, description="List of all findings")
-    gaps: List[str] = Field(default_factory=list, description="Unresolved issues or errors encountered")
+    gaps: List[str] = Field(default_factory=list, description="Stop reason when failed to provide any findings")
 
 
 # ==================== Agent ====================
+
+logger = logging.getLogger(__name__)
+
 
 class TraceFetcherAgent:
     """Trace Fetcher Agent that executes blockchain queries."""
@@ -69,10 +86,12 @@ class TraceFetcherAgent:
         Returns:
             State updates findings and gaps
         """
-        # Build tools list (add state_lookup if state available)
+        # Build tools list
         tools = list(self.base_tools)
-        if state:
-            tools.append(create_state_lookup_tool(state))
+
+        # NOTE: NO STATE_LOOKUP for now, let LLM decide what to fetch
+        # if state:
+        #     tools.append(create_state_lookup_tool(state))
 
         # Create agent with current tools
         agent = create_react_agent(
@@ -83,11 +102,12 @@ class TraceFetcherAgent:
         )
 
         # Build input with optional state hint
+        # NOTE: NO HINT for now, let LLM decide what to fetch
         brief_with_hint = task_brief
-        if state:
-            hint = state_ids_hint(state)
-            if hint:
-                brief_with_hint = f"{task_brief}\n\n[Existing IDs: {hint}]"
+        # if state:
+        #     hint = state_ids_hint(state)
+        #     if hint:
+        #         brief_with_hint = f"{task_brief}\n\n[Existing IDs: {hint}]"
 
         input_messages = [HumanMessage(content=brief_with_hint)]
 
@@ -124,85 +144,179 @@ class TraceFetcherAgent:
 
         findings: List[FindingDict] = []
         gaps: List[str] = list(schema.gaps)  # Start with LLM-reported gaps
+        seen_ids: set = set()  # Track seen finding IDs for deduplication
+
+        # Detect potential LLM hallucination: gaps reported but no tool calls made
+        if schema.gaps and not tool_results:
+            logger.warning(
+                "LLM reported gaps without calling any tools - possible hallucination. "
+                f"Gaps: {schema.gaps}"
+            )
+            gaps.append("WARNING: LLM refused to call tools (possible hallucination)")
 
         for f in schema.findings:
-            # Match by tool_name, use result_hint only if multiple results
-            # Returns {"args": {...}, "result": {...}} or None
-            entry = self._match_tool_result(tool_results, f.tool_name, f.result_hint)
+            # Validate tool_name before matching
+            if ":" in f.tool_name:
+                raise ValueError(f"Invalid tool_name '{f.tool_name}': contains ':' (looks like an ID, not a tool name)")
 
-            if entry is None:
-                gaps.append(f"No tool result matched: tool={f.tool_name}, hint={f.result_hint}")
+            if f.tool_name == "state_lookup":
+                logger.warning(f"Finding uses state_lookup instead of fetch tool. Skipping. Use fetch tools to get new data.")
+                gaps.append(f"Used state_lookup instead of fetch tool (invalid)")
                 continue
 
-            # No deduplication - if Fetcher agent is smart, it shouldn't produce duplicate tool calls
-            # Removed deduplication logic that was masking upstream issues
+            # Match by tool_name + args_hint (fuzzy match allowed)
+            # Returns list of matching entries (can be 0, 1, or multiple)
+            matched_entries = self._match_tool_result(tool_results, f.tool_name, f.tool_args_hint)
 
-            # Extract id from matched entry (uses both args and result)
-            finding_id = self._extract_id_from_data(f.kind, entry)
+            if not matched_entries:
+                error_msg = f"No tool result matched: tool={f.tool_name}, hints={f.tool_args_hint}"
+                gaps.append(error_msg)
+                # Raise immediately for debugging (gaps preserved for fallback)
+                raise ValueError(
+                    f"Finding matching failed: {error_msg}\n"
+                    f"Available tools: {list(tool_results.keys())}\n"
+                    f"All findings: {[{'tool': x.tool_name, 'hints': x.tool_args_hint} for x in schema.findings]}"
+                )
 
-            # Store only result in data field (args used internally for ID extraction)
-            findings.append(FindingDict(
-                kind=f.kind,
-                id=finding_id,
-                source=f.tool_name,
-                rationale=f.rationale,
-                data=entry.get("result", {})
-            ))
+            # Process all matched entries (deduplication happens at finding_id level)
+            for entry in matched_entries:
+                # Extract id from matched entry (uses both args and result)
+                finding_id = self._build_id_from_tool_call_data(f.kind, entry)
+
+                # Deduplicate by ID - skip if we've already added this finding
+                if finding_id in seen_ids:
+                    logger.info(
+                        f"Skipping duplicate finding: kind={f.kind}, tool={f.tool_name}, "
+                        f"id={finding_id}, hints={f.tool_args_hint}"
+                    )
+                    continue
+
+                seen_ids.add(finding_id)
+
+                # Store only result in data field (args used internally for ID extraction)
+                findings.append(FindingDict(
+                    kind=f.kind,
+                    id=finding_id,
+                    source=f.tool_name,
+                    rationale="",  # Removed: was causing LLM to generate unnecessary summaries
+                    data=entry.get("result", {})
+                ))
 
         return {
             "findings": findings,
             "gaps": gaps
         }
 
+    def _args_match(self, hints: List[str], entry: Dict[str, Any]) -> bool:
+        """Check if hints match tool call entry (args + result).
+
+        Smart matching strategy:
+        1. Separate hints into numeric and non-numeric
+        2. All numeric hints MUST match (they're critical identifiers)
+        3. Non-numeric hints are optional if numeric hints exist
+
+        Args:
+            hints: List of hint strings from LLM
+            entry: Tool call entry with {"args": {...}, "result": {...}}
+
+        Returns:
+            True if hints match according to smart rules
+        """
+        if not hints:
+            return True
+
+        # Flatten both args and result for searching
+        args_str = self._flatten_values(entry.get("args", {}))
+        result_str = self._flatten_values(entry.get("result", {}))
+        combined = f"{args_str} {result_str}"
+
+        # Classify hints into numeric and non-numeric
+        numeric_hints = [h for h in hints if is_numeric_like(h)]
+        non_numeric_hints = [h for h in hints if not is_numeric_like(h)]
+
+        # Rule 1: All numeric hints must match (they're critical)
+        for hint in numeric_hints:
+            hint_lower = str(hint).lower().strip()
+            if hint_lower not in combined:
+                return False
+
+        # Rule 2: Non-numeric hints - flexible based on whether we have numeric hints
+        if non_numeric_hints:
+            if numeric_hints:
+                # Have numeric identifiers - non-numeric are optional (may be from task brief)
+                # Just log if they don't match but don't fail
+                for hint in non_numeric_hints:
+                    hint_lower = str(hint).lower().strip()
+                    if hint_lower and hint_lower not in combined:
+                        logger.debug(f"Non-numeric hint '{hint}' not found but ignored (have numeric hints)")
+            else:
+                # No numeric hints - need at least one non-numeric to match
+                matched_any = False
+                for hint in non_numeric_hints:
+                    hint_lower = str(hint).lower().strip()
+                    if hint_lower and hint_lower in combined:
+                        matched_any = True
+                        break
+                if not matched_any:
+                    return False
+
+        return True
+
     def _match_tool_result(
         self,
         tool_results: Dict[str, List[Dict[str, Any]]],
         tool_name: str,
-        result_hint: List[str]
-    ) -> Optional[Dict[str, Any]]:
-        """Match finding to tool result by tool_name, using result_hint for disambiguation.
+        tool_args_hint: List[str]
+    ) -> List[Dict[str, Any]]:
+        """Match finding to tool results by tool_name + args_hint with fallback.
 
-        Each entry in tool_results is {"args": {...}, "result": {...}}.
-        Hint matching searches both args and result.
+        Smart matching strategy with LLM error tolerance:
+        1. Try matching by tool_name (partial match)
+        2. If no match and has args_hint, fallback to match all tools by args
+        3. If only 1 match, return immediately (no need to use hints)
+        4. If multiple matches, filter by args_hint
 
-        Strategy:
-        1. Find all entries matching tool_name (partial match)
-        2. If only one entry, return it (no hint needed)
-        3. If multiple entries, use result_hint to distinguish (searches args + result)
+        Args:
+            tool_results: Dict mapping tool names to list of call records
+            tool_name: Tool name from LLM finding (may be wrong)
+            tool_args_hint: List of hint strings from LLM (arg values to search for)
+
+        Returns:
+            List of matching entries (can be empty)
         """
-        # Collect all entries matching tool_name
+        # Step 1: Try matching by tool_name (partial match)
         matching_entries: List[Dict[str, Any]] = []
         for name, entries in tool_results.items():
             if tool_name in name or name in tool_name:
                 matching_entries.extend(entries)
 
-        if not matching_entries:
-            # Fallback: try all entries if tool_name doesn't match
+        # Step 2: If tool_name didn't match but we have args_hint, try fallback
+        if not matching_entries and tool_args_hint:
+            logger.info(f"Tool name '{tool_name}' not matched, trying args_hint fallback")
             for entries in tool_results.values():
                 matching_entries.extend(entries)
 
         if not matching_entries:
-            return None
+            return []
 
-        # If only one entry, return it directly (no disambiguation needed)
+        # Step 3: Single match - return immediately (no need to distinguish)
         if len(matching_entries) == 1:
-            return matching_entries[0]
+            return matching_entries
 
-        # Multiple entries: use result_hint to distinguish (search args + result)
-        if not result_hint:
-            # No hint provided, return first entry
-            return matching_entries[0]
+        # Step 4: Multiple matches - filter by args_hint
+        if not tool_args_hint:
+            logger.warning(
+                f"Multiple tool calls ({len(matching_entries)}) but no hints provided - "
+                f"returning all (may cause duplicates)"
+            )
+            return matching_entries
 
+        matched = []
         for entry in matching_entries:
-            # Build searchable string from both args and result
-            args_str = self._flatten_values(entry.get("args", {}))
-            result_str = self._flatten_values(entry.get("result", {}))
-            combined_str = f"{args_str} {result_str}"
-            if all(str(h).lower() in combined_str for h in result_hint):
-                return entry
+            if self._args_match(tool_args_hint, entry):
+                matched.append(entry)
 
-        # No match with hint, return first entry as fallback
-        return matching_entries[0]
+        return matched
 
     def _flatten_values(self, obj: Any, depth: int = 3) -> str:
         """Flatten nested dict/list values into searchable lowercase string."""
@@ -222,49 +336,56 @@ class TraceFetcherAgent:
         else:
             return str(obj).lower()
 
-    def _extract_id_from_data(self, kind: str, entry: Dict[str, Any]) -> str:
+    def _build_id_from_tool_call_data(self, kind: str, entry: Dict[str, Any]) -> str:
         """Extract canonical id from matched entry based on kind.
 
         Entry structure: {"args": {...}, "result": {...}}
         Uses both args and result to build meaningful IDs.
+
+        This method maps tool results to finding ID spec fields.
         """
         args = entry.get("args", {})
         result = entry.get("result", {})
 
-        if kind == "tx":
+        # Map tool result to finding ID spec fields
+        if kind == "get_tx":
             # Result may be a list (from get_txs tools) or dict (from get_tx tools)
+            # Collect all txids (single or batch)
+            txids = []
             if isinstance(result, list):
-                if len(result) != 1:
-                    raise ValueError(f"kind='tx' expects single tx, got {len(result)} txs. Use 'search_txs' or 'address_txs' for multiple results.")
-                return result[0]["txid"]
-            return result["txid"]
-        # elif kind in ("address", "address_txs"):
-        #     # Address may be in result or args depending on tool
-        #     # Result may be a list of txs
-        #     if isinstance(result, list) and result:
-        #         chain = args.get("chain") or result[0].get("chain")
-        #     else:
-        #         chain = args.get("chain") or result.get("chain")
-        #     addr = args.get("address")
-        #     return f"{chain}-{addr}"
+                txids = [tx["txid"] for tx in result if "txid" in tx]
+            else:
+                if "txid" in result:
+                    txids = [result["txid"]]
+
+            if not txids:
+                raise ValueError(f"kind='get_tx' requires at least one txid in result")
+
+            return build_finding_id("get_tx", txids=txids)
+
         elif kind == "price":
-            # Build id: COIN_in_QUOTE means "price of 1 COIN in QUOTE units"
-            coin = args["coin"]
-            quote = args["quote"]
-            start_ts = args.get("start_time")
-            end_ts = args.get("end_time")
-            return f"{coin}_in_{quote}@time({start_ts}-{end_ts})"
+            return build_finding_id("price",
+                coin=args["coin"],
+                quote=args["quote"],
+                start_ts=args.get("start_ts"),
+                end_ts=args.get("end_ts")
+            )
+
         elif kind == "search_txs":
-            # Use time window from args
-            # Result may be a list of txs
+            # Extract chain from args or result
             if isinstance(result, list) and result:
                 chain = args.get("chain") or result[0].get("chain")
             else:
                 chain = args.get("chain") or result.get("chain")
-            start_ts = args.get("min_timestamp")
-            end_ts = args.get("max_timestamp")
-            return f"{chain}@{start_ts}-{end_ts}"
-        raise ValueError(f"Unknown finding kind: {kind}")
+
+            return build_finding_id("search_txs",
+                chain=chain,
+                min_timestamp=args.get("min_timestamp"),
+                max_timestamp=args.get("max_timestamp")
+            )
+
+        else:
+            raise ValueError(f"Unknown finding kind: {kind}")
 
     def _extract_tool_results(self, messages: list) -> Dict[str, List[Dict[str, Any]]]:
         """Extract tool results from message history. Returns tool_name -> [{args, result}].

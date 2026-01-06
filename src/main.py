@@ -25,12 +25,7 @@ import config
 from src.graph.workflow import run_graph, create_graph
 
 
-def setup_logging():
-    """Setup logging configuration."""
-    logging.basicConfig(
-        level=getattr(logging, config.LOG_LEVEL),
-        format=config.LOG_FORMAT
-    )
+# Removed: setup_logging() now in config.py and called from main()
 
 
 def get_final_response(state: dict) -> str:
@@ -183,7 +178,10 @@ def run_batch(batch_file: str) -> int:
     errors = 0
     for i, item in enumerate(queries, 1):
         query = item.get("query", "").strip()
-        comment = item.get("comment", "")
+        groundtruth = item.get("groundtruth", "")
+        # Backward compatibility: fallback to 'comment' if 'groundtruth' not present
+        if not groundtruth:
+            groundtruth = item.get("comment", "")
 
         if not query:
             continue
@@ -200,8 +198,8 @@ def run_batch(batch_file: str) -> int:
             print("-" * 60)
             print(response)
             print("-" * 60)
-            if comment:
-                print(f"\n{comment}")
+            if groundtruth:
+                print(f"\nGround Truth: {groundtruth}")
         except Exception as e:
             print(f"\nError: {e}")
             if config.DEBUG_MODE:
@@ -238,27 +236,26 @@ def main():
         help="Run queries from a YAML batch file"
     )
     parser.add_argument(
-        "--debug",
-        action="store_true",
-        help="Enable debug mode"
-    )
-    parser.add_argument(
         "-v", "--verbose",
         action="count",
         default=0,
-        help="Verbose output: -v for messages only, -vv for full state"
+        help="Increase verbosity: -v (INFO), -vv (DEBUG business code), -vvv (full DEBUG)"
     )
 
     args = parser.parse_args()
 
-    if args.debug:
-        config.DEBUG_MODE = True
-        config.LOG_LEVEL = "DEBUG"
-
+    # Override VERBOSE_LEVEL from command line args (highest priority)
+    # Priority: command line args > environment variable > default (0)
     if args.verbose:
         config.VERBOSE_LEVEL = args.verbose
 
-    setup_logging()
+    # Setup logging using unified config
+    logging.basicConfig(
+        level=config.get_log_level(),
+        format=config.LOG_FORMAT,
+        datefmt=config.LOG_DATE_FORMAT
+    )
+    config.setup_logging()  # Apply namespace-specific levels for level 2
 
     if args.example:
         sys.exit(run_example())

@@ -8,7 +8,12 @@ import logging
 logger = logging.getLogger(__name__)
 
 def fetcher_node(state: TraceTxState) -> dict:
-    task_brief = state["task_brief"]
+    # Get task_brief from pending_trajectory
+    pending_traj = state.get("pending_trajectory", {})
+    task_brief = pending_traj.get("task_brief")
+
+    if not task_brief:
+        raise ValueError("No task_brief in pending_trajectory - orchestrator should have set this")
 
     logger.info(f"Trace Fetcher executing: {task_brief}...")
 

@@ -1,24 +1,9 @@
-from typing import Any, Dict, List, Optional, Annotated, TypedDict
+from typing import Any, Dict, List, Optional, TypedDict
 from typing_extensions import Annotated
-from pydantic import BaseModel, Field
-from src.models.core import Transfer, CrossChainLink
+from src.models.core import DstInfo, SrcInfo, Transfer, CrossChainLink
 from src.models.finding import Finding
 import operator
-
-
-class SrcInfo(BaseModel):
-    """Source tx base info ."""
-    chain: str = Field()
-    asset: str = Field(description="same as chain if native asset")
-
-class DestInfo(BaseModel):
-    """Destination tx base info."""
-    txid: str = Field(description="tx hash")
-    chain: str = Field()
-    asset: str = Field(description="same as chain if native asset")
-    op_id: str = Field(description="Operation ID in format 'vout:N' for both UTXO and Account chains (unified naming)")
-    amount: float = Field(description="Amount in human-readable units for the target operation")
-    time: int = Field(description="Timestamp in seconds")
+import config
 
 
 def merge_nested_dict(a: Dict[str, Dict], b: Dict[str, Dict]) -> Dict[str, Dict]:
@@ -34,25 +19,32 @@ def merge_nested_dict(a: Dict[str, Dict], b: Dict[str, Dict]) -> Dict[str, Dict]
             result[key] = inner_dict
     return result
 
+class Trajectory(TypedDict):
+    action: str
+    task_brief: Optional[str]
+    findings_ref: List[str] # finding id
 
 class TraceTxState(TypedDict, total=False):
     query: str
 
     # execution control
     iteration: int                  # current iteration count
-    action: Optional[str]           # "fetch" or "score"
+    action: Optional[str]           
 
-    task_brief: Optional[str]       # task for fetcher
+    trajectories: Annotated[List[Trajectory], operator.add]
+    pending_trajectory: Trajectory  # running trajectory w/o findings_ref, contains task_brief
 
     src_info: SrcInfo
-    dest_info: DestInfo
+    dst_info: DstInfo
 
-    dest_transfer: Transfer
     findings: Annotated[List[Finding], operator.add]
 
     # inbox from fetcher
     inbox_findings: List[Finding]   # clear when update (may merge multi fetcher on parallel)
     inbox_gaps: List[str]
+
+    # finding IDs that contains all candidates (set by orchestrator)
+    candidates_finding_ids: List[str]
 
     params: Dict[str, Any]
     # search_time_span: int (seconds)
@@ -65,7 +57,7 @@ class TraceTxState(TypedDict, total=False):
     # derived["search_window"]["amount"] = {"min": float, "max": float}
 
     # final results
-    transfers: Annotated[Dict[str, Dict[str, Transfer]], merge_nested_dict]  # [chain][transfer_id] -> Transfer
+    # transfers: Annotated[Dict[str, Dict[str, Transfer]], merge_nested_dict]  # [chain][transfer_id] -> Transfer
     cclinks: List[CrossChainLink]              # cross-chain links
 
     result: dict # {success: bool, data: dict, reason: str}, reason for failed cases
@@ -82,9 +74,14 @@ def state_ids_hint(state: TraceTxState) -> str:
     TRUNCATABLE_KINDS = {"tx", "address", "address_txs"}
 
     def _shorten(s: str, kind: str = "") -> str:
-        if kind in TRUNCATABLE_KINDS and len(s) > 20:
-            return s[:8].lower()
-        return kind + ":" + s.lower()
+        # IDs now include kind: prefix, so we can safely truncate hash-like IDs
+        if kind in TRUNCATABLE_KINDS and ":" in s:
+            # For tx IDs like "tx:abc123...", keep "tx:" and truncate hash part
+            prefix, hash_part = s.split(":", 1)
+            if len(hash_part) > 8:
+                return f"{prefix}:{hash_part[:8].lower()}"
+        # Non-truncatable IDs (price, search_txs) are kept intact
+        return s.lower()
 
     ids = []
 
@@ -106,5 +103,12 @@ def initialize_state(query: str) -> TraceTxState:
     return {
         "query": query,
         "iteration": 0,
-        "params": {"search_time_span": 1800, "search_price_buffer": 0.1, "check_time_span": 600},
+        "params": {
+            "search_time_span": config.TRACETX_SEARCH_TIME_SPAN,
+            "search_price_buffer": config.TRACETX_SEARCH_PRICE_BUFFER,
+            "check_time_span": config.TRACETX_CHECK_TIME_SPAN,
+        },
     }
+
+def get_all_findings(state: TraceTxState) -> List[Finding]:
+    return state.get("findings", []) + state.get("inbox_findings", [])

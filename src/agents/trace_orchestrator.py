@@ -17,47 +17,43 @@ from pydantic import BaseModel, Field
 
 import config
 from src.agents.prompts import load_prompt
-from src.state.tracetx_state import SrcInfo, TraceTxState, DestInfo
+from src.state.tracetx_state import TraceTxState
+from src.models.core import (
+    DstInfoSchema, SrcInfoSchema,
+    dst_info_schema_to_state, src_info_schema_to_state
+)
 from src.models.finding import format_finding_data, format_findings
 from src.utils.debug import print_messages, print_structure_output
 from src.utils.llm import create_chat_openai_with_retry
 
 logger = logging.getLogger(__name__)
 
-class TaskWant(BaseModel):
-    """What the orchestrator wants from the fetcher."""
-    k: int = Field(default=5, description="Top-k hits desired")
-    kinds: List[Literal["tx", "event", "address"]] = Field(
-        default_factory=list,
-        description="Types of data to fetch"
-    )
 
+# class CandidateOutput(BaseModel):
+#     """Candidate data output from orchestrator (source side of cross-chain link).
 
-class CandidateOutput(BaseModel):
-    """Candidate data output from orchestrator (source side of cross-chain link).
-
-    Price direction: SOURCE_in_DEST (1 src_coin = X dst_coin)
-    This allows scoring to use multiplication: expected_dest = src_amount * price
-    """
-    txid: str = Field(description="Source tx hash")
-    # chain: str = Field(description="Source chain")
-    op_id: str = Field(description="Operation ID in format 'vout:N' for both UTXO and Account-based")
-    amount: float = Field(description="Amount in human-readable units")
-    block_time: int = Field()
-    price_min: float = Field(description="Min price at candidate's timestamp (raw, no buffer)")
-    price_max: float = Field(description="Max price at candidate's timestamp (raw, no buffer)")
+#     Price direction: SOURCE_in_DESTINATION (1 src_coin = X dst_coin)
+#     This allows scoring to use multiplication: expected_dst = src_amount * price
+#     """
+#     txid: str = Field(description="Source tx hash")
+#     # chain: str = Field(description="Source chain")
+#     op_id: str = Field(description="Operation ID in format 'vout:N' for both UTXO and Account-based")
+#     amount: float = Field(description="Amount in human-readable units")
+#     block_time: int = Field()
+#     price_min: float = Field(description="Min price at candidate's timestamp (raw, no buffer)")
+#     price_max: float = Field(description="Max price at candidate's timestamp (raw, no buffer)")
 
 class TraceOrchestratorOutput(BaseModel):
     """Output from the trace orchestrator."""
-    action: Literal["fetch", "score", "stop"] = Field(description="Whether to continue fetching or stop")
+    action: Literal["fetch", "done", "fail"] = Field(description="Action: 'fetch' to continue fetching data, 'done' when ready for scoring, 'fail' when cannot proceed")
     # if action=fetch
     task_brief: Optional[str] = Field(default=None, description="Task for fetcher to execute")
-    want: Optional[TaskWant] = Field(default=None, description="What data is needed")
-    src_info: Optional[SrcInfo] = Field(default=None, description="Source tx info - output as soon as source tx is fetched, regardless of action")
-    dest_info: Optional[DestInfo] = Field(default=None, description="Destination tx info - output as soon as dest tx is fetched, regardless of action")
-    # if action=score - structured candidate data for scoring
-    candidates: Optional[List[CandidateOutput]] = Field(default=None, description="Source tx candidates")
-    stop_reason: Optional[str] = Field(default=None, description="Why stopping: ready_for_scoring, no_candidates, tool_failure")
+    src_info: Optional[SrcInfoSchema] = Field(default=None, description="Source tx info - output as soon as source tx is fetched, regardless of action")
+    dst_info: Optional[DstInfoSchema] = Field(default=None, description="Destination tx info - output as soon as dst tx is fetched, regardless of action")
+    # if action=done - finding IDs that contain the candidate and price data
+    candidates_finding_ids: Optional[List[str]] = Field(default=None, description="Finding IDs of search_txs to use for candidates (e.g., ['search_txs:BTC@1757641622-1757642822'])")
+    # candidates: Optional[List[CandidateOutput]] = Field(default=None, description="All source tx candidates")
+    fail_reason: Optional[str] = Field(default=None, description="Why failed: no candidates, tool failure, etc.")
 
 
 class TraceOrchestratorAgent:
@@ -97,7 +93,14 @@ class TraceOrchestratorAgent:
         #################
         params = state.get("params", {})
         if params:
-            context_parts.append(f"Params: {params}")
+            # Format time-related params with explicit "seconds" suffix for clarity
+            param_strs = []
+            for key, val in params.items():
+                if 'time_span' in key or 'time' in key:
+                    param_strs.append(f"{key}={val} (seconds)")
+                else:
+                    param_strs.append(f"{key}={val}")
+            context_parts.append(f"Params: {', '.join(param_strs)}")
 
         derived = state.get("derived", {})
         search_window = derived.get("search_window", {})
@@ -107,11 +110,21 @@ class TraceOrchestratorAgent:
             if time_w:
                 context_parts.append(f"Search Window - Time: {time_w['start_ts']} to {time_w['end_ts']}")
             if amount_w:
-                context_parts.append(f"Search Window - Amount: {amount_w['min']:.8f} to {amount_w['max']:.8f}")
+                asset = amount_w.get("asset", "")
+                asset_label = f" {asset}" if asset else ""
+                context_parts.append(f"Search Window - Amount: {amount_w['min']:.8f} to {amount_w['max']:.8f}{asset_label} (calculated from dst_amount * price)")
 
+        trajectories = state.get("trajectories", [])
+        if trajectories:
+            context_parts.append(f"Previous Actions ({len(trajectories)} total):")
+            for trajectory in trajectories:
+                context_parts.append(f"  - action: {trajectory['action']}")
+                context_parts.append(f"    task: {trajectory['task_brief']}")
+                context_parts.append(f"    finding IDs: {trajectory['findings_ref']}\n")
+                
         findings = state.get("findings")
         if findings:
-            context_parts.append(f"Findings ({len(findings)} total):\n")
+            context_parts.append(f"Previous Findings ({len(findings)} total):\n")
             context_parts.append(format_findings(findings, indent=0))
         
         if context_parts:
@@ -121,9 +134,10 @@ class TraceOrchestratorAgent:
         #################
         # Append last task brief
         #################
-        task_brief = state.get("task_brief")
+        pending_traj = state.get("pending_trajectory", {})
+        task_brief = pending_traj.get("task_brief")
         if task_brief:
-            messages.append(HumanMessage(content=f"[Fetch Task Brief]\n{task_brief}"))
+            messages.append(HumanMessage(content=f"[Last Task]\n{task_brief}"))
         
         #################
         # Append inbox findings and gaps
@@ -138,6 +152,6 @@ class TraceOrchestratorAgent:
             for g in inbox_gaps:
                 inbox_parts.append(f"  - {g}")
             inbox = "\n".join(inbox_parts)
-            messages.append(HumanMessage(content=f"[Fetch Report]\n{inbox}"))
+            messages.append(HumanMessage(content=f"[Latest Feedback]\n{inbox}"))
 
         return messages

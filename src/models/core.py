@@ -10,14 +10,38 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Literal, Optional
 
+from pydantic import BaseModel, Field
+from mashumaro import DataClassDictMixin
+
 logger = logging.getLogger(__name__)
 
 
 TxStatus = Literal["confirmed", "pending", "failed"]
 TransferType = Literal["utxo", "account"]
 
+
+# ========== State data models (dataclass with mashumaro) ==========
+
+@dataclass
+class SrcInfo(DataClassDictMixin):
+    """Source tx base info (used in state)."""
+    chain: str
+    asset: str  # same as chain if native asset
+
+
+@dataclass
+class DstInfo(DataClassDictMixin):
+    """Destination tx base info (used in state)."""
+    txid: str  # tx hash
+    chain: str
+    asset: str  # same as chain if native asset
+    op_id: str  # Operation ID in format 'vout:N' for both UTXO and Account chains
+    amount: float  # Amount in human-readable units for the target operation
+    time: int  # Timestamp in seconds
+
+
 @dataclass(frozen=True)
-class AccountIdentifier:
+class AccountIdentifier(DataClassDictMixin):
     """
     Rosetta-style account identifier.
     For UTXO outputs, address may be the decoded address if available;
@@ -27,7 +51,7 @@ class AccountIdentifier:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 @dataclass(frozen=True)
-class Operation:
+class Operation(DataClassDictMixin):
     """
     Operation: one account/coin state change.
 
@@ -53,7 +77,7 @@ class Operation:
     spent_coin_id: Optional[str] = None  # only for UTXO vin, format "prev_txid:prev_vout"
 
 @dataclass
-class Transfer:
+class Transfer(DataClassDictMixin):
     """
     Transaction-level transfer group.
     """
@@ -108,7 +132,7 @@ def format_transfer(transfer: Transfer) -> str:
 
 
 @dataclass
-class CrossChainLink:
+class CrossChainLink(DataClassDictMixin):
     """
     Inference edge between two chains' operations, with scoring data.
 
@@ -117,12 +141,12 @@ class CrossChainLink:
 
     Uses op_id to directly access operations via transfer.operations[op_id] dict lookup.
 
-    Price Direction Convention (SOURCE_in_DEST for scoring):
+    Price Direction Convention (SOURCE_in_DESTINATION for scoring):
     - price_min/price_max represent: 1 src_coin = X dst_coin
     - Example: BTC->DOGE trace (user spent BTC to get DOGE), price is how many DOGE per 1 BTC
     - These are raw prices from Binance at src tx time (±10min window), NO buffer applied
     - Buffers are applied during scoring using config.PRICE_MAX_FEE_RATE and PRICE_MAX_DEVIATION_RATE
-    - Note: Orchestrator uses DEST_in_SOURCE for raw search (Step 2), but Step 5 fetches SOURCE_in_DEST for scoring
+    - Note: Orchestrator uses DESTINATION_in_SOURCE for raw search (Step 2), but Step 5 fetches SOURCE_in_DESTINATION for scoring
     """
     id: str
 
@@ -181,3 +205,40 @@ def get_transfer(transfers: Dict[str, Dict[str, Transfer]], chain: str, txid: st
         return rst
     rst = transfers[chain].get(f"{txid}")
     return rst
+
+
+# ========== LLM Structured Output Schemas (Pydantic) ==========
+
+class SrcInfoSchema(BaseModel):
+    """Source tx base info schema for LLM structured output."""
+    chain: str = Field()
+    asset: str = Field(description="same as chain if native asset")
+
+
+class DstInfoSchema(BaseModel):
+    """Destination tx base info schema for LLM structured output."""
+    txid: str = Field(description="tx hash")
+    chain: str = Field()
+    asset: str = Field(description="same as chain if native asset")
+    op_id: str = Field(description="Operation ID in format 'vout:N' for both UTXO and Account chains (unified naming)")
+    amount: float = Field(description="Amount in human-readable units for the target operation")
+    time: int = Field(description="Timestamp in seconds")
+
+
+# Conversion helpers between Schema and State models
+
+def src_info_schema_to_state(schema: SrcInfoSchema) -> SrcInfo:
+    """Convert SrcInfoSchema (from LLM) to SrcInfo (for state)."""
+    return SrcInfo(chain=schema.chain, asset=schema.asset)
+
+
+def dst_info_schema_to_state(schema: DstInfoSchema) -> DstInfo:
+    """Convert DstInfoSchema (from LLM) to DstInfo (for state)."""
+    return DstInfo(
+        txid=schema.txid,
+        chain=schema.chain,
+        asset=schema.asset,
+        op_id=schema.op_id,
+        amount=schema.amount,
+        time=schema.time
+    )

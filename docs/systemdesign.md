@@ -332,7 +332,7 @@ class CandidateOutput(TypedDict):
     price_min: float
     price_max: float
 
-class DestInfo(TypedDict):
+class DstInfo(TypedDict):
     txid: str
     chain: str
     op_id: str
@@ -345,7 +345,7 @@ class TraceOrchestratorOutput(TypedDict):
     want: Optional[TaskWant]
     # if stop - structured data for scoring
     candidates: Optional[List[CandidateOutput]]
-    dest_info: Optional[DestInfo]
+    dst_info: Optional[DstInfo]
     stop_reason: Optional[str]  # ready_for_scoring, no_candidates, tool_failure
 ```
 

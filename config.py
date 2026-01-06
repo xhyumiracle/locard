@@ -11,6 +11,8 @@ from typing import Literal
 
 from dotenv import load_dotenv
 
+from src.utils.time import ensure_ts_seconds
+
 # Load environment variables from .env
 load_dotenv()
 
@@ -107,6 +109,18 @@ SCORING_W_VALUE = 8.0                 # Weight for amount feature (f_amount, bas
 FETCHER_DEFAULT_TOP_K = 5      # 默认返回 top-k 结果（避免返回过多数据）
 
 
+# ==================== TraceTx State Initialization Config ====================
+
+# Default parameters for initializing TraceTxState
+TRACETX_SEARCH_TIME_SPAN = 1800    # 搜索时间窗口（秒） (-span, +0)
+TRACETX_SEARCH_PRICE_BUFFER = 0.05  # 价格搜索缓冲区（5%）
+TRACETX_CHECK_TIME_SPAN = 300      # 价格检查时间窗口（秒）(-span, +span)
+
+def get_tracetx_search_time_window(anchor_time: int, time_span: int) -> tuple[int, int]:
+    return ensure_ts_seconds(anchor_time) - time_span, ensure_ts_seconds(anchor_time) + 0
+def get_tracetx_check_time_window(anchor_time: int, time_span: int) -> tuple[int, int]:
+    return ensure_ts_seconds(anchor_time) - time_span, ensure_ts_seconds(anchor_time) + time_span
+
 # ==================== API Keys (from environment variables) ====================
 
 # BTC/DOGE APIs
@@ -132,12 +146,12 @@ LLM_TEMPERATURE = 0.1  # 低温度，减少随机性，提高确定性
 LLM_MAX_TOKENS = 8192  # 最大输出 token 数
 
 # Per-agent model configuration
-# Each agent can have its own model override. If None, uses LLM_MODEL.
+# Each agent can have its own model override. If None or empty, uses default.
 AGENT_MODELS = {
-    "trace_orchestrator": os.getenv("AGENT_MODEL_ORCHESTRATOR", None),
-    "trace_fetcher": os.getenv("AGENT_MODEL_FETCHER", None),
-    "router": os.getenv("AGENT_MODEL_ROUTER", LLM_MODEL_LITE),  # Default to lite
-    "report": os.getenv("AGENT_MODEL_REPORT", LLM_MODEL_LITE),  # Default to lite
+    "trace_orchestrator": os.getenv("AGENT_MODEL_ORCHESTRATOR") or None,
+    "trace_fetcher": os.getenv("AGENT_MODEL_FETCHER") or None,
+    "router": os.getenv("AGENT_MODEL_ROUTER") or LLM_MODEL_LITE,  # Default to lite
+    "report": os.getenv("AGENT_MODEL_REPORT") or LLM_MODEL_LITE,  # Default to lite
 }
 
 def get_agent_model(agent_name: str) -> str:
@@ -247,32 +261,66 @@ def is_account_chain(chain: str) -> bool:
 
 # ==================== Logging Config ====================
 
-LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")  # DEBUG, INFO, WARNING, ERROR
+import logging as _logging
+
+# Unified verbosity configuration
+# Controls both logging level and debug output detail
+VERBOSE_LEVEL = int(os.getenv("VERBOSE_LEVEL", "0"))
+
+def get_log_level() -> int:
+    """
+    Convert VERBOSE_LEVEL to Python logging level for root logger.
+
+    Levels:
+      0 -> WARNING (default, only show warnings and errors)
+      1 -> INFO (basic workflow information)
+      2 -> INFO (business code will be promoted to DEBUG separately)
+      3+ -> DEBUG (everything including third-party libraries)
+    """
+    if VERBOSE_LEVEL == 0:
+        return _logging.WARNING
+    elif VERBOSE_LEVEL == 1:
+        return _logging.INFO
+    elif VERBOSE_LEVEL == 2:
+        return _logging.INFO  # Root stays at INFO to suppress third-party DEBUG
+    else:  # >= 3
+        return _logging.DEBUG
+
+def setup_logging():
+    """
+    Configure logging based on VERBOSE_LEVEL using namespace isolation.
+
+    This is the recommended way to set up logging for the entire application.
+    Call this once at application startup (in main.py or benchmark/__main__.py).
+
+    Logging levels:
+      0: WARNING  - Only warnings and errors (all loggers)
+      1: INFO     - Basic workflow information (all loggers)
+      2: DEBUG    - Business code (src.*, benchmark.*) + INFO for third-party
+      3: DEBUG    - Everything including third-party libraries
+
+    Implementation:
+      - Uses logger namespace hierarchy (src.*, benchmark.*)
+      - No need to maintain third-party library lists
+      - New business modules automatically inherit DEBUG at level 2
+      - New third-party libraries automatically stay at INFO at level 2
+    """
+    root_logger = _logging.getLogger()
+    root_level = get_log_level()
+    root_logger.setLevel(root_level)
+
+    if VERBOSE_LEVEL == 2:
+        # Level 2: Promote business code to DEBUG, keep third-party at INFO
+        # Only set our business namespaces to DEBUG
+        _logging.getLogger('src').setLevel(_logging.DEBUG)
+        _logging.getLogger('benchmark').setLevel(_logging.DEBUG)
+        # Root logger stays at INFO (affects all third-party loggers)
+
 LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+LOG_DATE_FORMAT = "%H:%M:%S"  # Only show time (HH:MM:SS), no date or milliseconds
 
 
 # ==================== Development/Debug Config ====================
 
 DEBUG_MODE = os.getenv("DEBUG_MODE", "false").lower() == "true"
 VERBOSE_ERRORS = DEBUG_MODE  # 是否在 error 中包含完整 traceback
-# 0 = off, 1 = messages only (-v), 2 = full state (-vv)
-VERBOSE_LEVEL = int(os.getenv("VERBOSE_LEVEL", "0"))
-
-
-# ==================== v1+ Preview (not used in v0) ====================
-
-# 以下配置在 v1 中才会使用，v0 中暂时忽略
-
-# Memory config
-MEMORY_ENABLED = False  # v1+ feature
-MEMORY_MAX_ENTRIES = 100
-MEMORY_EMBEDDING_MODEL = "text-embedding-ada-002"
-
-# Storage config
-STORAGE_ENABLED = False  # v1+ feature
-STORAGE_BACKEND: Literal["sqlite", "postgres", "mongodb"] = "sqlite"
-STORAGE_PATH = "./data/blockchain_mas.db"
-
-# Advanced error handling
-ERR_SUMMARY_NODE_ENABLED = False  # v1+ feature: LLM-based error compression
-ERR_SUMMARY_KEEP_RECENT = 20      # 压缩时保留最近的 N 条 error

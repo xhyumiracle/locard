@@ -14,3 +14,7 @@ wheels/
 archived/
 .env
 .DS_Store
+*.ndjson
+*.json
+*.log
+.claude

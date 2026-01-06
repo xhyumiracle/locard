@@ -1,11 +1,13 @@
 import logging
-from src.state.tracetx_state import TraceTxState
+import config
+from src.state.tracetx_state import TraceTxState, get_all_findings
 from src.tools.models import PriceRange
+from src.models.finding import build_finding_id, find_matching_price
 
 logger = logging.getLogger(__name__)
 
 def derive_node(state: TraceTxState) -> dict:
-    """Derive the search window from the dest transfer."""
+    """Derive the search window from the dst transfer."""
     updates = {}
 
     prev_derived = state.get("derived") or {}
@@ -16,78 +18,68 @@ def derive_node(state: TraceTxState) -> dict:
     logger.info(f"Derive node: Enter")
 
     # Step 1: Time window - now calculated by orchestrator itself (block_time - search_time_span)
-    dest_info = state.get("dest_info") or {}
-    dest_time = dest_info.get("time")
-    if dest_time:
+    dst_info = state.get("dst_info")
+    dst_time = dst_info.time if dst_info else None
+    if dst_time:
         search_time_span = state["params"]["search_time_span"]
-        dst_time = ensure_ts_seconds(dest_time)
-        start_ts = dst_time - search_time_span
-        end_ts = dst_time
+        start_ts, end_ts = config.get_tracetx_search_time_window(dst_time, search_time_span)
         updates["search_window"]["time"] = {"start_ts": start_ts, "end_ts": end_ts}
     else:
-        logger.info(f"Derive node: skip derive time window, dest_time={dest_time}")
+        logger.debug(f"Derive node: skip derive time window, dst_time={dst_time}")
 
     # Step 2: Derive search amount window from price findings
-    src_asset = state.get("src_info", {}).get("asset")
-    dest_asset = dest_info.get("asset")
-    dest_amount = dest_info.get("amount")
-    # # use updates rather than prev_derived, because we want to use the current time window
-    # search_time_window = updates.get("search_window",{}).get("time")
-    
-    # if src_asset and dest_asset and dest_amount and dest_time and search_time_window: # only on search_window is set
-    #     start_ts, end_ts = search_time_window.get("start_ts"), search_time_window.get("end_ts")
-    dest_time = dest_info.get("time")
+    src_info = state.get("src_info")
+    src_asset = src_info.asset if src_info else None
+    dst_asset = dst_info.asset if dst_info else None
+    dst_amount = dst_info.amount if dst_info else None
 
-    if src_asset and dest_asset and dest_amount and dest_time:
+    if src_asset and dst_asset and dst_amount and dst_time:
         # Calculate time window same as orch does (block_time - search_time_span, block_time)
         search_time_span = state["params"]["search_time_span"]
-        end_ts = ensure_ts_seconds(dest_time)
-        start_ts = end_ts - search_time_span
+        start_ts, end_ts = config.get_tracetx_search_time_window(dst_time, search_time_span)
 
-        fid_dest_in_src = f"{dest_asset}_in_{src_asset}@time({start_ts}-{end_ts})"
-        fid_src_in_dest = f"{src_asset}_in_{dest_asset}@time({start_ts}-{end_ts})"
+        # Build finding IDs using centralized interface
+        fid_dst_in_src = build_finding_id("price",
+            coin=dst_asset,
+            quote=src_asset,
+            start_ts=start_ts,
+            end_ts=end_ts
+        )
+        fid_src_in_dst = build_finding_id("price",
+            coin=src_asset,
+            quote=dst_asset,
+            start_ts=start_ts,
+            end_ts=end_ts
+        )
+
         # Look for matching price finding (search both findings and inbox_findings)
         price_range = None
-        all_findings = (state.get("findings") or []) + (state.get("inbox_findings") or [])
-        for finding in all_findings:
-            if finding.get("kind") != "price":
-                continue
-            fid = finding.get("id", "")
-            # Match: DEST_in_SRC (direct) or SRC_in_DEST (need to invert)
-            if fid == fid_dest_in_src:
-                price_range = PriceRange(**finding.get("data"))
-                break
-            elif fid == fid_src_in_dest:
-                data = finding.get("data")
-                # Invert: if 1 SRC = X DEST, then 1 DEST = 1/X SRC
-                price_range = PriceRange(
-                    price_min=1.0 / data["price_max"],
-                    price_max=1.0 / data["price_min"],
-                    via=data.get("via")
-                )
-                break
+
+        all_findings = get_all_findings(state)
+        
+        price_range = find_matching_price(
+            findings=all_findings,
+            coin=dst_asset,
+            quote=src_asset,
+            start_ts=start_ts,
+            end_ts=end_ts
+        )
 
         if price_range:
             updates["search_window"]["amount"] = {
-                "min": dest_amount * price_range.price_min,
-                "max": dest_amount * price_range.price_max
+                "min": dst_amount * price_range.price_min,
+                "max": dst_amount * price_range.price_max,
+                "asset": src_asset  # Mark the asset unit for LLM clarity
             }
         else:
-            logger.info(f"no matching price finding with {fid_dest_in_src} or {fid_src_in_dest}")
-            logger.info(f"- inbox_findings={state.get('inbox_findings')}")
-            logger.info(f"- findings={state.get('findings')}")
+            logger.debug(f"no matching price finding with {fid_dst_in_src} or {fid_src_in_dst}")
+            logger.debug(f"- inbox_findings={state.get('inbox_findings')}")
+            logger.debug(f"- findings={state.get('findings')}")
 
             # Clear amount window if no matching price (e.g., time span changed)
             updates["search_window"].pop("amount", None)
     else:
-        logger.info(f"Derive node: skip derive amount window, src_asset={src_asset}, dest_asset={dest_asset}, dest_amount={dest_amount}, dest_time={dest_time}")
+        logger.debug(f"Derive node: skip derive amount window, src_asset={src_asset}, dst_asset={dst_asset}, dst_amount={dst_amount}, dst_time={dst_time}")
  
     logger.info(f"Derive node: Leaving with search_window={updates.get('search_window')}")
     return {"derived": updates}
-
-def ensure_ts_seconds(ts: int) -> int:
-    """Ensure timestamp is in seconds."""
-    if ts > 1_000_000_000_000: # is ms
-        return ts // 1000
-    else:
-        return ts # is sec
