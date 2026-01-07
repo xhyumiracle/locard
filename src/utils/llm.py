@@ -9,7 +9,8 @@ import time
 from functools import wraps
 from typing import Any
 from langchain_openai import ChatOpenAI
-from openai import RateLimitError, APIError
+from openai import RateLimitError, APIError, APIConnectionError, APITimeoutError
+import httpx
 
 import config
 
@@ -17,17 +18,23 @@ logger = logging.getLogger(__name__)
 
 
 class ChatOpenAIWithRetry(ChatOpenAI):
-    """ChatOpenAI subclass with enhanced retry logic for persistent rate limits."""
+    """ChatOpenAI subclass with enhanced retry logic for transient errors."""
 
     def invoke(self, *args, **kwargs) -> Any:
         """
         Invoke with two-tier retry strategy:
         1. SDK built-in retry (max_retries=2): Handles short transient errors
-        2. Outer retry loop: Handles persistent rate limits with longer waits
+        2. Outer retry loop: Handles persistent errors with longer waits
 
-        Distinguishes between retryable and non-retryable rate limit errors:
-        - Retryable: TPM/RPM rate limits (wait and retry)
-        - Non-retryable: Request too large, quota exceeded (raise immediately)
+        Retryable errors:
+        - RateLimitError: TPM/RPM rate limits (wait and retry)
+        - APIError: Transient server errors (5xx)
+        - APIConnectionError: Network connection issues
+        - APITimeoutError: Request timeout
+
+        Non-retryable errors:
+        - Request too large, quota exceeded (raise immediately)
+        - Client errors (4xx): Bad request, auth, etc.
         """
         max_outer_attempts = config.LLM_MAX_RETRIES
 
@@ -121,6 +128,21 @@ class ChatOpenAIWithRetry(ChatOpenAI):
                     # 404: Not Found
                     logger.error(f"Non-retryable API error (status {status_code}): {error_str}")
                     raise
+            except (APIConnectionError, APITimeoutError) as e:
+                # Connection and timeout errors are transient - retry with backoff
+                error_str = str(e)
+                error_type = type(e).__name__
+
+                if attempt == max_outer_attempts - 1:
+                    logger.error(f"{error_type} after {max_outer_attempts} attempts: {error_str}")
+                    raise
+
+                wait_time = min(5 * (2 ** attempt), 60)
+                logger.warning(
+                    f"{error_type} (attempt {attempt + 1}/{max_outer_attempts}), "
+                    f"waiting {wait_time}s before retry. Error: {error_str}"
+                )
+                time.sleep(wait_time)
 
 
 def create_chat_openai_with_retry(
@@ -130,15 +152,22 @@ def create_chat_openai_with_retry(
     **kwargs
 ) -> ChatOpenAI:
     """
-    Create ChatOpenAI instance with automatic retry for rate limits.
+    Create ChatOpenAI instance with automatic retry for transient errors.
 
     Two-tier retry strategy:
     1. SDK built-in retry (max_retries=2): Handles short transient errors (0.8s → 1.6s)
-    2. Outer retry wrapper: Handles persistent rate limits with longer waits (5s → 10s → 20s → 40s → 60s)
+    2. Outer retry wrapper: Handles persistent errors with longer waits (5s → 10s → 20s → 40s → 60s)
 
     Retries on:
     - RateLimitError: Rate limit exceeded (429)
-    - APIError: Transient API errors (5xx)
+    - APIError: Transient server errors (5xx)
+    - APIConnectionError: Network connection issues
+    - APITimeoutError: Request timeout
+
+    Timeout configuration:
+    - Uses httpx.Timeout for explicit timeout control
+    - connect: 30s (time to establish connection)
+    - read/write/pool: config.LLM_TIMEOUT (default 120s)
 
     Args:
         model: Model name (default: config.LLM_MODEL)
@@ -153,11 +182,19 @@ def create_chat_openai_with_retry(
         llm = create_chat_openai_with_retry(temperature=0)
         llm_with_structured = llm.with_structured_output(MySchema)
     """
+    # Create explicit timeout object with separate connect timeout
+    # connect: 30s - time to establish connection (shorter, fails fast if unreachable)
+    # read/write/pool: config.LLM_TIMEOUT - time for data transfer (longer, handles slow responses)
+    timeout = httpx.Timeout(
+        timeout=config.LLM_TIMEOUT,  # Default for read/write/pool
+        connect=30.0  # Shorter connect timeout to fail fast
+    )
+
     return ChatOpenAIWithRetry(
         model=model or config.LLM_MODEL,
         temperature=temperature if temperature is not None else config.LLM_TEMPERATURE,
         max_tokens=max_tokens or config.LLM_MAX_TOKENS,
         max_retries=2,  # SDK handles short retries (0.8s → 1.6s)
-        timeout=config.LLM_TIMEOUT,
+        timeout=timeout,
         **kwargs
     )
