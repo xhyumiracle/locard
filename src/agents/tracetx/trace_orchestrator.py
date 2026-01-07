@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 
 import config
 from src.agents.prompts import load_prompt
-from src.agents.tool_agent import create_tool_agent
+from src.agents.tool_agent_with_error_handling import create_tool_agent_with_error_handling
 from src.state.tracetx_state import TraceTxState
 from src.models.core import (
     DstInfoSchema, SrcInfoSchema,
@@ -69,14 +69,18 @@ class TraceOrchestratorAgent:
         base_llm = create_chat_openai_with_retry(
             model=config.get_agent_model("trace_orchestrator")
         )
+
         # Prepare calculator tools (these are already @tool decorated)
         calculator_tools = [
             calculate_search_time_window,
             calculate_search_amount_window,
             calculate_check_time_windows
         ]
-        # Create tool agent with structured output
-        self.agent = create_tool_agent(
+
+        # Create tool agent with error handling and structured output
+        # Tool errors will be caught and converted to error messages
+        # This allows the LLM to see "Error: Fetch price first" and return action="fetch"
+        self.agent = create_tool_agent_with_error_handling(
             llm=base_llm,
             tools=calculator_tools,
             output_schema=TraceOrchestratorOutput
@@ -90,7 +94,7 @@ class TraceOrchestratorAgent:
 
         print_messages("trace_orchestrator", "Input", messages)
 
-        # Invoke tool agent (handles tool calling + structured output)
+        # Invoke tool agent (handles tool calling + error handling + structured output)
         result = self.agent.invoke(messages)
 
         print_messages("trace_orchestrator", "Output", result)

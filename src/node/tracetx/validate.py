@@ -82,10 +82,16 @@ def candidates_to_cclinks(candidate_txs: List[dict], dst_info: DstInfo, all_find
     for candidate in candidate_txs:
         candidate_transfer = converter.dict_to_transfer(candidate)
 
-        # assert only one operation
-        if len(candidate_transfer.operations) != 1:
-            raise ValueError(f"Candidate transfer {candidate_transfer} has multiple operations")
-        src_op = list(candidate_transfer.operations.values())[0]
+        # Candidate must have exactly one vout operation (recipient/output)
+        # Multiple operations are OK (e.g., AccountTx/EthCall have both vin+vout),
+        # but we need exactly one vout to match as the source output
+        vout_ops = {k: v for k, v in candidate_transfer.operations.items() if k.startswith("vout:")}
+        if len(vout_ops) != 1:
+            raise ValueError(
+                f"Candidate transfer {candidate_transfer.txid} must have exactly 1 vout operation, "
+                f"found {len(vout_ops)}: {list(vout_ops.keys())}"
+            )
+        src_op = list(vout_ops.values())[0]
 
         # Find matching price range for the candidate check time window
         start_ts, end_ts = config.get_tracetx_check_time_window(candidate_transfer.block_time, check_time_span)

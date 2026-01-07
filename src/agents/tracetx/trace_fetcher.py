@@ -156,12 +156,13 @@ class TraceFetcherAgent:
         seen_ids: set = set()  # Track seen finding IDs for deduplication
 
         # Detect potential LLM hallucination: gaps reported but no tool calls made
-        if schema.gaps and not tool_results:
-            logger.warning(
-                "LLM reported gaps without calling any tools - possible hallucination. "
-                f"Gaps: {schema.gaps}"
-            )
-            gaps.append("WARNING: LLM refused to call tools (possible hallucination)")
+        # Can't distinguish no fingins vs no tool call
+        # if schema.gaps and not tool_results:
+        #     logger.warning(
+        #         "LLM reported gaps without calling any tools - possible hallucination. "
+        #         f"Gaps: {schema.gaps}"
+        #     )
+        #     gaps.append("WARNING: LLM refused to call tools (possible hallucination)")
 
         for f in schema.findings:
             # Validate tool_name before matching
