@@ -8,7 +8,7 @@ import time
 from typing import Dict
 
 from config import get_asset_decimals
-from src.tools.models import UtxoTx, UtxoOutput, AccountTx, EthCall
+from src.tools.models import UtxoTx, UtxoOutput, AccountTx, EthCall, Eth3xplTransfer
 from src.models.core import (
     Transfer, Operation, AccountIdentifier, TxStatus
 )
@@ -210,6 +210,41 @@ def eth_call_to_transfer(call: EthCall, source: str = "unknown") -> Transfer:
         type="account"  # Internal calls are part of account model
     )
 
+def eth_3xpl_transfer_to_transfer(transfer: Eth3xplTransfer, source: str = "unknown") -> Transfer:
+    """Convert Eth3xplTransfer to lightweight Transfer model.
+
+    Creates a Transfer with only the recipient operation (vout:0).
+    Similar to utxo_output_to_transfer - represents a single incoming transfer.
+
+    Args:
+        transfer: ETH transfer event from 3xpl ClickHouse
+        source: Data source name (default: "3xpl-clickhouse")
+    """
+    asset = transfer.chain  # Always "ETH"
+    decimals = get_asset_decimals(transfer.chain)
+
+    # Single vout operation (recipient-side)
+    op_id = "vout:0"
+    op = Operation(
+        op_id=op_id,
+        account=AccountIdentifier(address=transfer.recipient),
+        amount=transfer.amount,
+        asset=asset,
+        decimals=decimals,
+        spent_coin_id=None
+    )
+
+    return Transfer(
+        txid=transfer.txid,
+        chain=transfer.chain,
+        block_time=transfer.block_time,
+        status="confirmed",
+        block_height=transfer.block,
+        block_hash=None,
+        operations={op_id: op},
+        type="account"  # ETH transfers are part of account model
+    )
+
 def dict_to_transfer(data: dict) -> Transfer:
     """Convert dict to Transfer model."""
 
@@ -227,6 +262,11 @@ def dict_to_transfer(data: dict) -> Transfer:
     if "depth" in data and "index" in data:
         call = EthCall(**data)
         return eth_call_to_transfer(call)
+
+    # Check if it's Eth3xplTransfer (has 'module' field - unique to 3xpl)
+    if "module" in data:
+        transfer = Eth3xplTransfer(**data)
+        return eth_3xpl_transfer_to_transfer(transfer)
 
     # Check if it's AccountTx (has 'sender' or 'recipient')
     if "sender" in data or "recipient" in data:

@@ -33,6 +33,16 @@ def calculate_search_amount_window(
     """Convert dst amount to src amount using price range. Handles price direction automatically.
 
     Just provide the price you got (any direction), this tool handles inversion if needed."""
+    # Validate price inputs
+    if price_min <= 0 or price_max <= 0:
+        raise ValueError(
+            f"Invalid prices ({price_min}, {price_max}). "
+            f"Fetch {price_coin}_in_{price_quote} price first before calling this calculator."
+        )
+
+    if dst_amount <= 0:
+        raise ValueError(f"Invalid dst_amount: {dst_amount}. Amount must be positive.")
+
     # Check if price direction matches our need (dst_asset in src_asset)
     if price_coin.upper() == dst_asset.upper() and price_quote.upper() == src_asset.upper():
         # Direct match: dst_asset_in_src_asset
