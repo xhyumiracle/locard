@@ -65,7 +65,7 @@ Use human-readable units (BTC, ETH, DOGE) in all briefs, not atomic units.
 `Fetch <CHAIN> address <addr> txs from <min_ts> to <max_ts>`
 `Search <CHAIN> txs/outputs from <search_start_ts> to <search_end_ts> [with amount <min> to <max>, direction is out]`
 `Fetch COIN1_in_COIN2 price from <search_start_ts> to <search_end_ts>` (with price buffer ±5%)
-`Batch fetch COIN1/COIN2 prices for each of the following time windows:[<check_start_ts_1>, <check_end_ts_1>], [<check_start_ts_2>, <check_end_ts_2>], ...`
+`Batch fetch COIN1_in_COIN2 prices for each of the following time windows: [<check_start_ts_1>, <check_end_ts_1>], [<check_start_ts_2>, <check_end_ts_2>], ...`
 
 **Invalid briefs** (YOU handle, not Fetcher): "Calculate...", "Analyze...", "Score..."
 
