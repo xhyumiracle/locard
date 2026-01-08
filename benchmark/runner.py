@@ -12,7 +12,6 @@ Modes can be chained together or run independently.
 import json
 import logging
 import time
-import sys
 from pathlib import Path
 from typing import List, Literal
 from datetime import datetime
@@ -102,38 +101,9 @@ class BenchmarkRunner:
         self.force = force
         self.continue_mode = continue_mode
 
-        # Check output directory based on modes
-        if continue_mode:
-            # Continue mode: work directory must exist
-            if not self.output_dir.exists():
-                raise ValueError(
-                    f"--continue requires existing work directory: {self.output_dir}\n"
-                    f"The directory does not exist. Please check the path."
-                )
-        elif self.output_dir.exists():
-            # Directory exists - give helpful hints and exit gracefully
-            if "candidate" in self.modes:
-                if any(self.output_dir.iterdir()):
-                    # Check if there are existing results
-                    results_dir = self.output_dir / "results"
-                    has_results = results_dir.exists() and any(results_dir.iterdir())
-
-                    if has_results:
-                        print(f"💡 Work directory already contains results: {self.output_dir}")
-                        print(f"   To add more cases, use: --continue")
-                        print(f"   To overwrite existing cases, use: --continue --force")
-                        import sys
-                        sys.exit(0)
-            # Score/Evaluate modes: Give hint if not using force
-            elif not force:
-                # Check if results directory exists and has content
-                results_dir = self.output_dir / "results"
-                if results_dir.exists() and any(results_dir.iterdir()):
-                    print(f"💡 Overwriting existing score_table.json and metrics.json files")
-                    print(f"   Use --force to confirm overwriting")
-                    import sys
-                    sys.exit(0)
-        else:
+        # Create output directory if it doesn't exist
+        # Note: Directory validation is done in __main__.py before log file creation
+        if not self.output_dir.exists():
             self.output_dir.mkdir(parents=True, exist_ok=True)
 
         # Directory structure:
@@ -160,22 +130,61 @@ class BenchmarkRunner:
 
         # Note: Per-query agent logging is set up dynamically during candidate mode execution
 
-    def get_query_results_dir(self, query_id: str) -> Path:
-        """Get results directory for a specific query."""
-        return self.results_dir / query_id
+    def get_query_results_dir(self, query_id: str, query_idx: int = None) -> Path:
+        """Get results directory for a specific query.
 
-    def get_query_result_path(self, query_id: str, filename: str) -> Path:
+        Args:
+            query_id: Full query ID hash
+            query_idx: Optional query index from YAML (0-indexed)
+
+        Returns:
+            Path in format: results/{bench_id}
+        """
+        bench_id = self.make_bench_id(query_id, query_idx)
+        return self.results_dir / bench_id
+
+    def get_query_result_path(self, query_id: str, filename: str, query_idx: int = None) -> Path:
         """Get result file path for a specific query."""
-        results_dir = self.get_query_results_dir(query_id)
+        results_dir = self.get_query_results_dir(query_id, query_idx)
         results_dir.mkdir(parents=True, exist_ok=True)
         return results_dir / filename
 
-    def scan_existing_cases(self) -> set:
-        """
-        Scan results/ directory to get existing case IDs.
+    @staticmethod
+    def make_bench_id(query_id: str, query_idx: int = None) -> str:
+        """Construct benchmark ID (folder name) from query_id and optional index.
+
+        This is the canonical way to construct folder names in results/ directory.
+
+        Args:
+            query_id: Full query ID hash
+            query_idx: Optional 0-indexed position in YAML
 
         Returns:
-            Set of query_id strings that have results directories
+            Folder name:
+            - With index: "000000_d4d39e5c" (NNNNNN_XXXXXXXX format, 6 digits + 8 chars)
+            - Without index: "d4d39e5c78c41cbd..." (full query_id, legacy format)
+
+        Examples:
+            >>> BenchmarkRunner.make_bench_id("d4d39e5c78c41cbd...", 0)
+            '000000_d4d39e5c'
+            >>> BenchmarkRunner.make_bench_id("d4d39e5c78c41cbd...", None)
+            'd4d39e5c78c41cbd...'
+        """
+        if query_idx is not None:
+            # New format: 000000_d4d39e5c (6 digits for up to 999,999 queries)
+            return f"{query_idx:06d}_{query_id[:8]}"
+        else:
+            # Legacy format: full query_id
+            return query_id
+
+    def scan_existing_cases(self) -> set:
+        """
+        Scan results/ directory to get existing bench_ids (folder names).
+
+        Returns:
+            Set of bench_id strings (full folder names):
+            - New format: "000000_d4d39e5c"
+            - Legacy format: "full_query_id_hash..."
         """
         if not self.results_dir.exists():
             return set()
@@ -183,6 +192,7 @@ class BenchmarkRunner:
         existing = set()
         for item in self.results_dir.iterdir():
             if item.is_dir():
+                # Return full folder name (bench_id_full)
                 existing.add(item.name)
 
         return existing
@@ -327,20 +337,34 @@ class BenchmarkRunner:
             return
 
         # Check for duplicates if in continue mode
-        existing_cases = self.scan_existing_cases()
-        query_ids_from_yaml = [q.get("metadata", {}).get("query_id") for q in queries if q.get("metadata", {}).get("query_id")]
-        duplicated_cases = [qid for qid in query_ids_from_yaml if qid in existing_cases]
-        new_cases = [qid for qid in query_ids_from_yaml if qid not in existing_cases]
+        existing_cases = self.scan_existing_cases()  # Set of full folder names (bench_ids)
+
+        # Build bench_ids for queries from YAML
+        query_bench_ids = []
+        for q in queries:
+            metadata = q.get("metadata", {})
+            query_id = metadata.get("query_id")
+            query_idx = metadata.get("query_idx")
+            if query_id:
+                bench_id = self.make_bench_id(query_id, query_idx)
+                query_bench_ids.append(bench_id)
+
+        # Find duplicates and new cases
+        duplicated_bench_ids = [bid for bid in query_bench_ids if bid in existing_cases]
+        new_bench_ids = [bid for bid in query_bench_ids if bid not in existing_cases]
 
         # Handle duplicates in continue mode
         if self.continue_mode:
-            if duplicated_cases and not self.force:
+            if duplicated_bench_ids and not self.force:
                 # Skip duplicates - filter to only new cases
-                queries = [q for q in queries if q.get("metadata", {}).get("query_id") in new_cases]
-            elif duplicated_cases and self.force:
+                new_bench_ids_set = set(new_bench_ids)
+                queries = [q for q in queries
+                          if self.make_bench_id(q.get("metadata", {}).get("query_id"),
+                                               q.get("metadata", {}).get("query_idx")) in new_bench_ids_set]
+            elif duplicated_bench_ids and self.force:
                 # Overwrite duplicates - process all queries
                 if self.verbose:
-                    print(f"⚠️  Overwriting {len(duplicated_cases)} existing case(s)")
+                    print(f"⚠️  Overwriting {len(duplicated_bench_ids)} existing case(s)")
             else:
                 # No duplicates - process all queries (which are all new)
                 pass
@@ -357,7 +381,7 @@ class BenchmarkRunner:
             print(f"MODE: CANDIDATE - Extracting CCLinks")
             print(f"{'=' * 60}")
             if self.continue_mode:
-                print(f"Continue mode: {len(existing_cases)} existing, {len(duplicated_cases)} duplicated, {len(new_cases)} new")
+                print(f"Continue mode: {len(existing_cases)} existing, {len(duplicated_bench_ids)} duplicated, {len(new_bench_ids)} new")
             if offset > 0 or limit:
                 print(f"Processing queries [{offset}:{end_idx}] ({len(queries)} queries)")
             else:
@@ -374,8 +398,11 @@ class BenchmarkRunner:
         graph = SUBGRAPH_MAP["tracetx"]
 
         for i, query_item in enumerate(queries, 1):
-            # Extract query_id from metadata
-            query_id = query_item.get("metadata", {}).get("query_id")
+            # Extract query_id and query_idx from metadata
+            metadata = query_item.get("metadata", {})
+            query_id = metadata.get("query_id")
+            query_idx = metadata.get("query_idx")  # YAML index (0-indexed)
+
             if not query_id:
                 logger.warning(f"[Index {i}] Skipped (missing query_id in metadata)")
                 continue
@@ -388,10 +415,12 @@ class BenchmarkRunner:
             processed_count += 1
 
             if self.verbose:
-                print(f"\n[{i}/{len(queries)}] Query {query_id[:16]}...: {query[:60]}...")
+                # Show with query_idx if available
+                idx_str = f"idx={query_idx}, " if query_idx is not None else ""
+                print(f"\n[{i}/{len(queries)}] Query {idx_str}{query_id[:16]}...: {query[:60]}...")
 
             # Setup per-query agent log file
-            agent_log_path = self.get_query_result_path(query_id, "agent.log")
+            agent_log_path = self.get_query_result_path(query_id, "agent.log", query_idx)
             case_handler = logging.FileHandler(agent_log_path, mode='w', encoding='utf-8')
             case_handler.setLevel(logging.DEBUG)  # Handler accepts DEBUG and above
             case_handler.setFormatter(logging.Formatter(config.LOG_FORMAT, datefmt=config.LOG_DATE_FORMAT))
@@ -419,6 +448,10 @@ class BenchmarkRunner:
 
                 if self.verbose:
                     print(f"  ✓ Found {len(cclinks)} CCLinks in {execution_time:.2f}s")
+                    # Show ground truth if available
+                    groundtruth = self._extract_ground_truth(query_item)
+                    if groundtruth:
+                        print(f"  Ground Truth: {groundtruth}")
 
                 logger.info(
                     f"[Query {query_id}] Success: {len(cclinks)} cclinks in {execution_time:.2f}s"
@@ -432,7 +465,7 @@ class BenchmarkRunner:
                     "execution_time": execution_time,
                     "success": True
                 }
-                result_path = self.get_query_result_path(query_id, "candidate_cclinks.json")
+                result_path = self.get_query_result_path(query_id, "candidate_cclinks.json", query_idx)
                 with open(result_path, 'w', encoding='utf-8') as f:
                     json.dump(result_data, f, indent=2, ensure_ascii=False)
 
@@ -459,7 +492,7 @@ class BenchmarkRunner:
                     "success": False,
                     "error": error_msg
                 }
-                result_path = self.get_query_result_path(query_id, "candidate_cclinks.json")
+                result_path = self.get_query_result_path(query_id, "candidate_cclinks.json", query_idx)
                 with open(result_path, 'w', encoding='utf-8') as f:
                     json.dump(result_data, f, indent=2, ensure_ascii=False)
 
@@ -481,8 +514,8 @@ class BenchmarkRunner:
             "yaml_file": str(yaml_path),  # Store user-provided path (relative, not absolute)
             "offset": offset,
             "limit": limit,
-            "duplicated_cases": len(duplicated_cases),
-            "new_cases": len(new_cases),
+            "duplicated_cases": len(duplicated_bench_ids),
+            "new_cases": len(new_bench_ids),
             "processed_cases": processed_count,
             "execution_seconds": mode_time
         }
@@ -679,49 +712,53 @@ class BenchmarkRunner:
 
         # Load ground truth from yaml
         queries = self.load_queries(yaml_path)
-        ground_truth_map = {}  # query_id -> ground_truth
+        ground_truth_map = {}  # bench_id -> ground_truth
         for query_item in queries:
-            query_id = query_item.get("metadata", {}).get("query_id")
+            metadata = query_item.get("metadata", {})
+            query_id = metadata.get("query_id")
+            query_idx = metadata.get("query_idx")
             if not query_id:
                 continue
             gt = self._extract_ground_truth(query_item)
             if gt:
-                ground_truth_map[query_id] = gt
+                # Build full bench_id as key to match folder names
+                bench_id = self.make_bench_id(query_id, query_idx)
+                ground_truth_map[bench_id] = gt
 
-        # Collect all query IDs from results directory
-        query_ids = []
+        # Collect all bench_ids from results directory
+        # bench_id format: "000000_d4d39e5c" (new) or "full_hash" (legacy)
+        bench_ids = []
         for query_dir in sorted(self.results_dir.iterdir()):
             if query_dir.is_dir():
                 score_path = query_dir / "score_table.json"
                 if score_path.exists():
-                    query_id = query_dir.name
-                    query_ids.append(query_id)
+                    bench_ids.append(query_dir.name)
 
         if self.verbose:
-            print(f"Evaluating {len(query_ids)} cases...")
+            print(f"Evaluating {len(bench_ids)} cases...")
             print(f"Ground truth available for {len(ground_truth_map)} cases")
 
         metric_results = []
 
-        for query_id in query_ids:
-            # Read score table
-            score_path = self.get_query_result_path(query_id, "score_table.json")
+        for bench_id_full in bench_ids:
+            # Read score table using full bench_id
+            score_path = self.results_dir / bench_id_full / "score_table.json"
             with open(score_path, 'r', encoding='utf-8') as f:
                 case = json.load(f)
 
             score_table = case.get("score_table")
-            ground_truth = ground_truth_map.get(query_id)
+            ground_truth = ground_truth_map.get(bench_id_full)
 
             if not ground_truth:
                 if self.verbose:
-                    print(f"\n[{query_id}] Skipped (no ground truth)")
-                logger.info(f"[Query {query_id}] Skipped - no ground truth")
+                    print(f"\n[{bench_id_full}] Skipped (no ground truth)")
+                logger.info(f"[Query {bench_id_full}] Skipped - no ground truth")
                 continue
 
             if not score_table or not case.get("success"):
                 if self.verbose:
-                    print(f"\n[{query_id}] Skipped (scoring failed)")
-                logger.info(f"[Query {query_id}] Skipped - scoring failed")
+                    print(f"\n[{bench_id_full}] Skipped (scoring failed)")
+                logger.info(f"[Query {bench_id_full}] Skipped - scoring failed")
                 continue
 
             # Calculate metrics
@@ -742,7 +779,8 @@ class BenchmarkRunner:
                 "valid_candidates": metric["valid_candidates"],
                 "hit_at_k": {str(k): v for k, v in hit_at_k.items()}  # Convert int keys to str for JSON
             }
-            result_path = self.get_query_result_path(query_id, "metrics.json")
+            # Save to bench_id folder
+            result_path = self.results_dir / bench_id_full / "metrics.json"
             with open(result_path, 'w', encoding='utf-8') as f:
                 json.dump(result_data, f, indent=2, ensure_ascii=False)
 
@@ -759,9 +797,9 @@ class BenchmarkRunner:
                     rank_str = f"#{rank}/{valid_count}"
                 else:
                     rank_str = f"NOT_FOUND/{valid_count}"
-                # Format: [query_id] GT: HASH... Rank: #3/12
+                # Format: [bench_id] GT: HASH... Rank: #3/12
                 gt_short = ground_truth[:8] if ground_truth else "N/A"
-                print(f"[{query_id}] GT: {gt_short}... Rank: {rank_str}")
+                print(f"[{bench_id_full}] GT: {gt_short}... Rank: {rank_str}")
 
         # Calculate aggregated metrics
         if metric_results:
@@ -862,36 +900,9 @@ class BenchmarkRunner:
         1. Validate that required input files exist
         2. Run each mode in order
         3. Save run_info.json with execution summary
-        4. Automatically save full log to run_{filename}.log
+
+        Note: Log file redirection is handled in __main__.py before logging.basicConfig()
         """
-
-        # Setup full run log file (only for candidate mode)
-        tee_stdout = None
-        tee_stderr = None
-        original_stdout = None
-        original_stderr = None
-        run_log_handler = None
-
-        if "candidate" in self.modes and yaml_path:
-            log_filename = self.get_run_log_filename(yaml_path, limit, offset)
-            run_log_path = self.output_dir / log_filename
-
-            # Redirect stdout and stderr to capture all output
-            original_stdout = sys.stdout
-            original_stderr = sys.stderr
-            tee_stdout = TeeOutput(run_log_path, original_stdout)
-            sys.stdout = tee_stdout
-            sys.stderr = tee_stdout  # Also capture errors
-
-            # Also add logging handler for logger outputs
-            run_log_handler = logging.FileHandler(run_log_path, mode='a', encoding='utf-8')
-            run_log_handler.setLevel(logging.DEBUG)
-            run_log_handler.setFormatter(logging.Formatter(config.LOG_FORMAT, datefmt=config.LOG_DATE_FORMAT))
-            root_logger = logging.getLogger()
-            root_logger.addHandler(run_log_handler)
-
-            if self.verbose:
-                print(f"Full run log will be saved to: {log_filename}")
 
         if self.verbose:
             print(f"\n{'#' * 60}")
@@ -943,19 +954,6 @@ class BenchmarkRunner:
             print(f"{'#' * 60}")
 
         logger.info(f"Benchmark run completed")
-
-        # Restore stdout/stderr and close file handlers
-        if tee_stdout:
-            sys.stdout = original_stdout
-            sys.stderr = original_stderr
-            tee_stdout.close()
-            if self.verbose:
-                print(f"Full run log saved to: {run_log_path}")
-
-        if run_log_handler:
-            root_logger = logging.getLogger()
-            root_logger.removeHandler(run_log_handler)
-            run_log_handler.close()
 
 
 def run_benchmark(

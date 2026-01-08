@@ -22,6 +22,40 @@ import config
 from benchmark.runner import run_benchmark
 
 
+def _generate_log_filename(yaml_path: str, limit: int = None, offset: int = 0) -> str:
+    """Generate log filename based on YAML name and query range."""
+    yaml_name = Path(yaml_path).stem
+    parts = [f"run_{yaml_name}"]
+    if limit:
+        parts.append(f"limit{limit}")
+    if offset > 0:
+        parts.append(f"offset{offset}")
+    return "_".join(parts) + ".log"
+
+
+def _get_unique_log_path(work_dir: Path, base_filename: str) -> Path:
+    """Get a unique log file path by auto-incrementing if file exists.
+
+    Adapted from Ultralytics YOLO increment_path function.
+    Example: run_exp.log -> run_exp_2.log -> run_exp_3.log, etc.
+    """
+    log_path = work_dir / base_filename
+    if not log_path.exists():
+        return log_path
+
+    # File exists, increment with suffix number
+    stem = log_path.stem  # filename without extension
+    suffix = log_path.suffix  # .log
+
+    for n in range(2, 9999):
+        new_path = work_dir / f"{stem}_{n}{suffix}"
+        if not new_path.exists():
+            return new_path
+
+    # Fallback (should never reach here)
+    return log_path
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="BlockchainMAS Benchmark Runner",
@@ -121,15 +155,7 @@ Examples:
     else:
         config.VERBOSE_LEVEL = args.verbose  # Use -v count (0, 1, 2, 3, ...)
 
-    # Setup logging using unified config
-    logging.basicConfig(
-        level=config.get_log_level(),
-        format=config.LOG_FORMAT,
-        datefmt=config.LOG_DATE_FORMAT
-    )
-    config.setup_logging()  # Apply namespace-specific levels for level 2
-
-    # Determine which modes need yaml
+    # Determine modes and yaml requirements (do this once)
     modes = args.modes or ["candidate", "score", "evaluate"]
     modes_need_yaml = {"candidate", "evaluate"}
     needs_yaml = any(mode in modes_need_yaml for mode in modes)
@@ -147,6 +173,57 @@ Examples:
     elif args.yaml:
         # Warn if yaml provided but not needed
         print(f"Warning: --yaml provided but not needed for score-only mode (ignored)")
+
+    # Early validation: check work directory before creating log file
+    # This prevents overwriting log files when validation fails
+    work_dir = Path(args.work_dir)
+    if args.continue_mode:
+        # Continue mode: work directory must exist
+        if not work_dir.exists():
+            print(f"Error: --continue requires existing work directory: {work_dir}")
+            print(f"The directory does not exist. Please check the path.")
+            sys.exit(1)
+    elif work_dir.exists() and "candidate" in modes:
+        # Directory exists without --continue in candidate mode
+        if any(work_dir.iterdir()):
+            results_dir = work_dir / "results"
+            has_results = results_dir.exists() and any(results_dir.iterdir())
+            if has_results:
+                print(f"💡 Work directory already contains results: {work_dir}")
+                print(f"   To add more cases, use: --continue")
+                print(f"   To overwrite existing cases, use: --continue --force")
+                sys.exit(0)
+
+    # Setup log file redirection BEFORE basicConfig (if candidate mode)
+    # This ensures logging output is captured to file
+    from benchmark.runner import TeeOutput
+    tee_stdout = None
+    original_stdout = None
+    original_stderr = None
+
+    if "candidate" in modes and yaml_path:
+        # Create work directory if it doesn't exist (needed for log file)
+        work_dir.mkdir(parents=True, exist_ok=True)
+
+        log_filename = _generate_log_filename(str(yaml_path), args.limit, args.offset)
+        run_log_path = _get_unique_log_path(work_dir, log_filename)
+
+        # Redirect stdout and stderr BEFORE basicConfig
+        original_stdout = sys.stdout
+        original_stderr = sys.stderr
+        tee_stdout = TeeOutput(run_log_path, original_stdout)
+        sys.stdout = tee_stdout
+        sys.stderr = tee_stdout
+
+        print(f"Full run log will be saved to: {run_log_path.name}")
+
+    # Setup logging using unified config (will use redirected stderr if set)
+    logging.basicConfig(
+        level=config.get_log_level(),
+        format=config.LOG_FORMAT,
+        datefmt=config.LOG_DATE_FORMAT
+    )
+    config.setup_logging()  # Apply namespace-specific levels for level 2
 
     # Run benchmark
     try:
@@ -167,6 +244,12 @@ Examples:
             import traceback
             traceback.print_exc()
         sys.exit(1)
+    finally:
+        # Restore stdout/stderr and close log file
+        if tee_stdout:
+            sys.stdout = original_stdout
+            sys.stderr = original_stderr
+            tee_stdout.close()
 
 
 if __name__ == "__main__":

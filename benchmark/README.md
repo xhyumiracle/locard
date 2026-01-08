@@ -88,12 +88,18 @@ output/exp1/
 ├── overall_metrics.json       # Aggregated metrics (hit rates, MRR, etc.)
 ├── run_queries_limit10.log    # Full execution log (auto-saved)
 └── results/
-    └── {query_id}/
+    └── {bench_id}/                # Format: NNNNNN_XXXXXXXX (e.g., 000000_d4d39e5c)
         ├── agent.log                # Per-case execution log
         ├── candidate_cclinks.json   # Candidate CCLinks
         ├── score_table.json         # Scoring results
         └── metrics.json             # Per-case metrics with hit_at_k
 ```
+
+**Benchmark ID (bench_id) Format:**
+- Format: `{query_idx:06d}_{query_id[:8]}` (e.g., `000000_d4d39e5c`, `000001_bf444429`)
+- `query_idx`: 0-indexed position in YAML (required in `metadata.query_idx`)
+- `query_id[:8]`: First 8 characters of query_id hash for uniqueness
+- Enables natural sorting in file explorers and IDEs
 
 ### Key Metrics (overall_metrics.json)
 
