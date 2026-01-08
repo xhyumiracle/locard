@@ -124,20 +124,8 @@ def get_tracetx_check_time_window(anchor_time: int, time_span: int) -> tuple[int
 
 # ==================== API Keys (from environment variables) ====================
 
-# BTC/DOGE APIs
-BLOCKCYPHER_TOKEN = os.getenv("BLOCKCYPHER_TOKEN", "")
+# Blockchain Data APIs
 BLOCKCHAIR_API_KEY = os.getenv("BLOCKCHAIR_API_KEY", "")
-BITQUERY_API_KEY = os.getenv("BITQUERY_API_KEY", "")
-
-# ETH APIs
-ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY", "")
-ALCHEMY_API_KEY = os.getenv("ALCHEMY_API_KEY", "")
-INFURA_PROJECT_ID = os.getenv("INFURA_PROJECT_ID", "")
-
-# Price/Exchange rate APIs (for cross-chain amount matching)
-# Binance: 无需 API key，完全免费
-CRYPTOCOMPARE_API_KEY = os.getenv("CRYPTOCOMPARE_API_KEY", "")  # Optional, 备用方案
-
 
 # ==================== LLM Config ====================
 
@@ -319,3 +307,4 @@ def setup_logging():
 
 LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 LOG_DATE_FORMAT = "%H:%M:%S"  # Only show time (HH:MM:SS), no date or milliseconds
+
