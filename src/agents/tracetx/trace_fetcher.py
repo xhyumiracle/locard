@@ -20,7 +20,7 @@ from src.state.tracetx_state import state_ids_hint, TraceTxState
 from src.models.finding import Finding as FindingDict, build_finding_id, get_finding_kinds_hint
 from src.tools.registry import get_trace_fetcher_tools
 from src.tools.state_tools import create_state_lookup_tool
-from src.agents.prompts import load_prompt
+from src.prompts import load_prompt
 from src.utils.debug import print_messages, print_structure_output
 from src.utils.llm import create_chat_openai_with_retry
 from src.utils.string import is_numeric_like

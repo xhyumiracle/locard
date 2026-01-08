@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 import yaml
 
 import config
-from src.agents.prompts import load_prompt
+from src.prompts import load_prompt
 from src.agents.tool_agent_with_error_handling import create_tool_agent_with_error_handling
 from src.state.tracetx_state import TraceTxState
 from src.models.core import (

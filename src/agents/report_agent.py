@@ -10,7 +10,7 @@ from langchain_core.messages import SystemMessage, HumanMessage
 
 import config
 from src.node.tracetx.score import ScoreTable, format_score_table
-from src.agents.prompts import load_prompt
+from src.prompts import load_prompt
 from src.utils.llm import create_chat_openai_with_retry
 
 class ReportAgent:

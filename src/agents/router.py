@@ -13,7 +13,7 @@ from typing_extensions import TypedDict
 from langchain_core.messages import SystemMessage
 
 import config
-from src.agents.prompts import load_prompt
+from src.prompts import load_prompt
 from src.state.graph_state import Subgraph
 from src.utils.debug import print_messages
 from src.utils.llm import create_chat_openai_with_retry
