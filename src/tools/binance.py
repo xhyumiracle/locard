@@ -22,7 +22,7 @@ from langchain_core.tools import tool
 from pydantic import BaseModel
 import httpx
 
-from src.tools.base import BaseAPIClient, with_retry, FatalError, TransientError, cached, record_rate_limit
+from src.clients.base import BaseAPIClient, with_retry, FatalError, TransientError, cached, record_rate_limit
 from src.tools.models import PriceRange
 
 logger = logging.getLogger(__name__)
@@ -90,13 +90,19 @@ class BinanceClient(BaseAPIClient):
         """
         Handle Binance API response with special logic for rate limit bans.
 
+        Responsibility: Error classification ONLY. Does not perform sleep.
+        Sleep is handled by @with_retry decorator.
+
         Binance returns 418 with JSON body containing ban expiry time:
         {"code":-1003,"msg":"Way too much request weight used; IP banned until 1767519478680..."}
 
-        This method parses the ban time and sleeps until unban if needed.
+        This method parses the ban time and attaches it to TransientError as retry_after.
         """
         if response.status_code == 418:
-            # Try to parse ban time from response body
+            record_rate_limit(self.SOURCE_NAME)
+
+            # Try to parse ban time from response body and extract retry_after
+            retry_after = None
             try:
                 data = response.json()
                 msg = data.get("msg", "")
@@ -106,25 +112,20 @@ class BinanceClient(BaseAPIClient):
                     ban_until_ms = int(match.group(1))
                     now_ms = int(time.time() * 1000)
                     if ban_until_ms > now_ms:
-                        wait_seconds = (ban_until_ms - now_ms) / 1000.0
-                        # Cap wait time at 5 minutes to avoid hanging forever
-                        wait_seconds = min(wait_seconds, 300)
-                        logger.warning(
+                        # Calculate wait time but don't sleep here
+                        # Let @with_retry handle the actual sleep
+                        retry_after = (ban_until_ms - now_ms) / 1000.0
+                        logger.debug(
                             f"Binance IP banned until {ban_until_ms} "
-                            f"(waiting {wait_seconds:.1f}s). "
+                            f"(server suggests {retry_after:.1f}s). "
                             f"Message: {msg}"
                         )
-                        time.sleep(wait_seconds)
-                        # After sleeping, still record rate limit and raise error
-                        # so retry logic can try again
-                        record_rate_limit(self.SOURCE_NAME)
-                        raise TransientError(f"Rate limit ban (waited {wait_seconds:.1f}s until unban)")
             except (ValueError, KeyError, AttributeError) as e:
                 logger.debug(f"Failed to parse ban time from 418 response: {e}")
 
-            # Fallback: no parseable ban time, just record and raise
-            record_rate_limit(self.SOURCE_NAME)
-            raise TransientError("Rate limit exceeded (418: IP restricted or WAF block)")
+            # Raise TransientError with retry_after metadata
+            # @with_retry will use retry_after if available, otherwise use exponential backoff
+            raise TransientError("Rate limit exceeded (418: IP restricted or WAF block)", retry_after=retry_after)
 
         # Handle 400 errors (bad request)
         if response.status_code == 400:

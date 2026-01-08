@@ -24,7 +24,10 @@ Return a FetchReport. Rules:
   - Even if tool results have identical values, they MUST be separate findings if they used different parameters (e.g., different time windows)
   - Provide `tool_args_hint` to identify each tool call (see schema for details)
 - **kind selection by query method** (NOT by result count):
-  - `kind="get_tx"`: Direct fetch BY tx hash(s)
+  - `kind="get_tx"`: Direct fetch BY tx hash(es)
   - `kind="search_txs"`: Filter/search by conditions
   - `kind="price"`: Price data queries
 - **MUST fetch with the EXACT time/amount windows specified in the task brief**
+- **Price queries: ALWAYS use exact coin/quote pair from task brief**
+  - Example: "Fetch {COIN1}_in_{COIN2} price" → call `get_price_binance(coin="{COIN1}", quote="{COIN2}")`
+  - DO NOT split into intermediates - the tool auto-handles unavailable pairs via triangulation

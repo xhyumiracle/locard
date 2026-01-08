@@ -13,10 +13,10 @@ from typing_extensions import TypedDict
 from langchain_core.messages import SystemMessage
 
 import config
-from src.agents.prompts import load_prompt
+from src.prompts import load_prompt
 from src.state.graph_state import Subgraph
 from src.utils.debug import print_messages
-from src.utils.llm import create_chat_openai_with_retry
+from src.llm import create_chat_model
 
 class RouterOutput(TypedDict):
     route: Subgraph
@@ -25,7 +25,7 @@ class RouterAgent:
     """Router Agent that decides which workflow to use."""
 
     def __init__(self):
-        llm = create_chat_openai_with_retry(
+        llm = create_chat_model(
             model=config.get_agent_model("router"),
             temperature=0,
             max_tokens=100

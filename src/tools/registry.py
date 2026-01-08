@@ -22,6 +22,9 @@ from src.tools.blockchair import (
     get_block_txs_blockchair,
     get_address_blockchair,
 )
+from src.tools.threexpl import (
+    search_eth_transfers_3xpl,
+)
 from src.tools.binance import get_price_binance
 
 
@@ -40,10 +43,11 @@ def get_trace_tools() -> List[BaseTool]:
         get_addresses_txs_blockchair,    # Multi-chain (paid)
 
         # Time-based transaction search
-        search_txs_doge_electrs,   # DOGE only - free (scans blocks)
-        search_txs_blockchair,     # Multi-chain (paid) - filters by tx total
-        search_utxo_outputs_blockchair,  # Multi-chain (paid) - filters by individual output amount
-        search_eth_calls_blockchair,     # ETH only (paid) - filters ETH internal transfers
+        # search_txs_doge_electrs,   # DOGE only - free (scans blocks)
+        # search_txs_blockchair,     # Multi-chain (paid) - filters by tx total (less precise)
+        search_utxo_outputs_blockchair,  # RECOMMENDED - Multi-chain (paid) - filters by individual output amount
+        # search_eth_calls_blockchair,     # ETH only (paid) - requires address filter
+        search_eth_transfers_3xpl,         # RECOMMENDED - ETH only (MVP free) - no address required, OLAP queries
 
         # Price for cross-chain amount matching
         get_price_binance,

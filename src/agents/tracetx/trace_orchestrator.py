@@ -12,11 +12,13 @@ Responsibilities:
 import logging
 from typing import Dict, List, Literal, Optional
 
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
 from pydantic import BaseModel, Field
+import yaml
 
 import config
-from src.agents.prompts import load_prompt
+from src.prompts import load_prompt
+from src.agents.tool_agent_with_error_handling import create_tool_agent_with_error_handling
 from src.state.tracetx_state import TraceTxState
 from src.models.core import (
     DstInfoSchema, SrcInfoSchema,
@@ -24,7 +26,12 @@ from src.models.core import (
 )
 from src.models.finding import format_finding_data, format_findings
 from src.utils.debug import print_messages, print_structure_output
-from src.utils.llm import create_chat_openai_with_retry
+from src.llm import create_chat_model
+from src.tools.calculators import (
+    calculate_search_time_window,
+    calculate_search_amount_window,
+    calculate_check_time_windows
+)
 
 logger = logging.getLogger(__name__)
 
@@ -55,15 +62,38 @@ class TraceOrchestratorOutput(BaseModel):
     # candidates: Optional[List[CandidateOutput]] = Field(default=None, description="All source tx candidates")
     fail_reason: Optional[str] = Field(default=None, description="Why failed: no candidates, tool failure, etc.")
 
+    # Self-reflection tracking (optional)
+    reflection_update: Optional[Dict[str, Dict[str, bool]]] = Field(
+        default=None,
+        description="""Optional: Update reflection tracking for self-verification. Only records BEHAVIOR (whether tools were called), NOT results.
+        Example: {"step_2": {"tool_called": True, "verified": True}}
+        DO NOT include calculation results (window, windows) - extract those from findings."""
+    )
+
 
 class TraceOrchestratorAgent:
     """Trace Orchestrator Agent that controls the tracing workflow."""
 
     def __init__(self):
-        llm = create_chat_openai_with_retry(
+        base_llm = create_chat_model(
             model=config.get_agent_model("trace_orchestrator")
         )
-        self.llm = llm.with_structured_output(TraceOrchestratorOutput)
+
+        # Prepare calculator tools (these are already @tool decorated)
+        calculator_tools = [
+            calculate_search_time_window,
+            calculate_search_amount_window,
+            calculate_check_time_windows
+        ]
+
+        # Create tool agent with error handling and structured output
+        # Tool errors will be caught and converted to error messages
+        # This allows the LLM to see "Error: Fetch price first" and return action="fetch"
+        self.agent = create_tool_agent_with_error_handling(
+            llm=base_llm,
+            tools=calculator_tools,
+            output_schema=TraceOrchestratorOutput
+        )
 
     def process(
         self,
@@ -72,7 +102,10 @@ class TraceOrchestratorAgent:
         messages = self._build_messages(state)
 
         print_messages("trace_orchestrator", "Input", messages)
-        result = self.llm.invoke(messages)
+
+        # Invoke tool agent (handles tool calling + error handling + structured output)
+        result = self.agent.invoke(messages)
+
         print_messages("trace_orchestrator", "Output", result)
         return result
 
@@ -102,17 +135,17 @@ class TraceOrchestratorAgent:
                     param_strs.append(f"{key}={val}")
             context_parts.append(f"Params: {', '.join(param_strs)}")
 
-        derived = state.get("derived", {})
-        search_window = derived.get("search_window", {})
-        if search_window:
-            time_w = search_window.get("time")
-            amount_w = search_window.get("amount")
-            if time_w:
-                context_parts.append(f"Search Window - Time: {time_w['start_ts']} to {time_w['end_ts']}")
-            if amount_w:
-                asset = amount_w.get("asset", "")
-                asset_label = f" {asset}" if asset else ""
-                context_parts.append(f"Search Window - Amount: {amount_w['min']:.8f} to {amount_w['max']:.8f}{asset_label} (calculated from dst_amount * price)")
+        # derived = state.get("derived", {})
+        # search_window = derived.get("search_window", {})
+        # if search_window:
+        #     time_w = search_window.get("time")
+        #     amount_w = search_window.get("amount")
+        #     if time_w:
+        #         context_parts.append(f"Search Window - Time: {time_w['start_ts']} to {time_w['end_ts']}")
+        #     if amount_w:
+        #         asset = amount_w.get("asset", "")
+        #         asset_label = f" {asset}" if asset else ""
+        #         context_parts.append(f"Search Window - Amount: {amount_w['min']:.8f} to {amount_w['max']:.8f}{asset_label} (calculated from dst_amount * price)")
 
         trajectories = state.get("trajectories", [])
         if trajectories:
@@ -126,7 +159,13 @@ class TraceOrchestratorAgent:
         if findings:
             context_parts.append(f"Previous Findings ({len(findings)} total):\n")
             context_parts.append(format_findings(findings, indent=0))
-        
+
+        # Add reflection status
+        reflection = state.get("reflection", {})
+        if reflection:
+            reflection_str = yaml.dump(reflection, default_flow_style=False, sort_keys=False).rstrip()
+            context_parts.append(f"[Self-Reflection Status]\n{reflection_str}")
+
         if context_parts:
             context = "\n".join(context_parts)
             messages.append(HumanMessage(content=f"[Context]\n{context}"))

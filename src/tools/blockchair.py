@@ -14,7 +14,7 @@ from langchain_core.tools import tool
 
 import config
 from config import is_utxo_chain, get_asset_unit
-from src.tools.base import BaseAPIClient, with_retry, cached
+from src.clients.base import BaseAPIClient, with_retry, cached, QuotaExhaustedError
 from src.tools.models import UtxoTx, UtxoOutput, AccountTx, Vin, Vout, EthCall
 from src.tools.filters import filter_txs, filter_tx_by_address_direction
 
@@ -38,6 +38,20 @@ class BlockchairClient(BaseAPIClient):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.api_key = config.BLOCKCHAIR_API_KEY
+
+    def _handle_response(self, response):
+        """Override to handle Blockchair-specific status codes."""
+        # Handle Blockchair-specific 432 error (API quota exhausted)
+        # This is a non-standard status code used by Blockchair for daily quota limits
+        # Unlike 429 (rate limit), 432 is definitive - quota is exhausted until reset
+        if response.status_code == 432:
+            raise QuotaExhaustedError(
+                f"Blockchair API quota exhausted (432). "
+                f"Daily request limit reached. Wait for quota reset at 00:00 UTC or upgrade API plan. "
+                f"Cannot continue with Blockchair API."
+            )
+        # Delegate to parent for standard HTTP error handling
+        return super()._handle_response(response)
 
     def _build_url(self, chain: str, endpoint: str) -> str:
         """Build API URL with optional API key."""
@@ -152,8 +166,8 @@ class BlockchairClient(BaseAPIClient):
                 block_time=block_time,
                 sender=tx_info.get("sender"),
                 recipient=tx_info.get("recipient"),
-                amount=tx_info.get("value", 0) / unit if tx_info.get("value") else 0,
-                fee=tx_info.get("fee", 0) / unit if tx_info.get("fee") else 0,
+                amount=int(tx_info.get("value", 0)) / unit if tx_info.get("value") else 0,
+                fee=int(tx_info.get("fee", 0)) / unit if tx_info.get("fee") else 0,
                 meta={
                     "gas_used": tx_info.get("gas_used"),
                     "gas_price": tx_info.get("gas_price"),
@@ -253,10 +267,21 @@ class BlockchairClient(BaseAPIClient):
         query_parts = [f"time({min_time_str}..{max_time_str})"]
 
         # Add amount filter if specified
+        # IMPORTANT: Blockchair API uses different units for query parameters:
+        # - UTXO chains (BTC/DOGE/LTC): use satoshi (1e8) for output_total/input_total
+        # - ETH: use ETH (not wei) for value parameter
         if min_amount > 0 or max_amount > 0:
-            min_sat = int(min_amount * unit) if min_amount > 0 else 0
-            max_sat = int(max_amount * unit) if max_amount > 0 else int(1e18)  # Large default max
-            query_parts.append(f"{amount_field}({min_sat}..{max_sat})")
+            if is_utxo_chain(chain):
+                # UTXO: convert to satoshi
+                min_sat = int(min_amount * unit) if min_amount > 0 else 0
+                max_sat = int(max_amount * unit) if max_amount > 0 else int(1e18)  # Large default max
+                query_parts.append(f"{amount_field}({min_sat}..{max_sat})")
+            else:
+                # ETH: use amount directly (in ETH, not wei)
+                if max_amount > 0:
+                    query_parts.append(f"{amount_field}({min_amount}..{max_amount})")
+                else:
+                    query_parts.append(f"{amount_field}({min_amount}..)")
 
         query = f"q={','.join(query_parts)}&limit={limit}&s=time(desc)"
         url = f"{self.BASE_URL}/{chain_name}/transactions?{query}"
@@ -519,6 +544,10 @@ def search_txs_blockchair(
     """
     Search transactions across the chain. Multi-chain: BTC/DOGE/ETH/LTC/BCH. Paid API.
 
+    NOTE: For cross-chain tracing, prefer search_utxo_outputs_blockchair (UTXO chains) or
+    search_eth_calls_blockchair (ETH) as they provide more precise output/operation matching.
+    This tool filters by total transaction amount and lacks per-operation identifiers.
+
     Args:
         chain: Chain (BTC, DOGE, ETH, LTC, BCH)
         min_timestamp: Start time (Unix), 0 = no lower bound
@@ -603,9 +632,10 @@ def search_utxo_outputs_blockchair(
     """
     Search individual outputs (vouts) by amount and time. Only for UTXO chain: BTC/DOGE/LTC/BCH. Paid API.
 
-    This is a search_txs category tool - it searches and filters transaction outputs.
-    Unlike other search_txs tools which filter by tx total, this filters by INDIVIDUAL output amount.
-    Best for cross-chain tracing where you need to match a specific UTXO amount.
+    This is a search_txs category tool - it searches and filters outputs/transfers.
+    RECOMMENDED for cross-chain tracing: This tool is highly accurate and efficient for tracing UTXO chains.
+    It filters by INDIVIDUAL output amount (not transaction total) and provides precise per-output identifiers (vout:N).
+    Unlike search_txs_blockchair which lacks operation identifiers, this tool directly pinpoints the exact output.
 
     Args:
         chain: Chain (BTC, DOGE, LTC, BCH) - NOT ETH (no UTXO)
@@ -667,10 +697,12 @@ def search_eth_calls_blockchair(
     """
     Search ETH internal transactions (calls) by time, address, and amount. Only for ETH mainnet. Paid API.
 
+    
     This is a search_txs category tool - it searches and filters internal calls/transfers.
-    Unlike ETH transactions which show only top-level transfers, this shows ALL internal
-    transfers including those from smart contracts (e.g., LiFi, THORChain Router, etc.).
-    Best for cross-chain tracing where ETH transfers happen through intermediary contracts.
+    RECOMMENDED for ETH cross-chain tracing: This tool is highly accurate for tracing ETH transfers.
+    It shows ALL internal transfers including those from smart contracts (e.g., LiFi, THORChain Router, etc.). 
+    Provides precise per-operation identifiers for each internal call.
+    Unlike search_txs_blockchair which lacks operation identifiers, this tool directly pinpoints exact transfers.
 
     IMPORTANT: Value amounts use ETH unit (not wei):
     - Query: value(10) = 10 ETH
@@ -688,17 +720,6 @@ def search_eth_calls_blockchair(
     Returns:
         List[EthCall]: List of internal calls with sender, recipient, amount (ETH), time.
         Each call represents an actual ETH transfer at any call depth.
-
-    Example:
-        # Find 10 ETH transfers through LiFi to THORChain vault
-        search_eth_calls_blockchair(
-            recipient="0xd03d56ef7d11a1a5a0933c1d524ff0bc1e916c98",
-            min_timestamp=swap_time - 600,
-            max_timestamp=swap_time + 600,
-            min_amount=9.5,
-            max_amount=10.5,
-            limit=100
-        )
     """
     if min_timestamp <= 0 and max_timestamp <= 0:
         raise ValueError("At least one of min_timestamp or max_timestamp must be specified")

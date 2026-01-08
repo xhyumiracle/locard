@@ -95,6 +95,8 @@ class Transfer(DataClassDictMixin):
 def format_transfer(transfer: Transfer) -> str:
     """Format Transfer into compact string for LLM context.
 
+    Uses self-explaining key-value format for operations.
+
     Args:
         transfer: Transfer object to format
 
@@ -109,7 +111,7 @@ def format_transfer(transfer: Transfer) -> str:
     if transfer.block_time:
         parts.append(f"block_time={transfer.block_time}")
 
-    # Operations - separate vin and vout
+    # Operations - separate vin and vout with self-explaining format
     vins = []
     vouts = []
     for op_id, op in transfer.operations.items():
@@ -117,11 +119,11 @@ def format_transfer(transfer: Transfer) -> str:
         amount = op.amount if op.amount is not None else 0
 
         if op_id.startswith("vin:"):
-            idx = op_id.split(":")[1]
-            vins.append(f"vin-{idx}:{addr}:{amount}")
+            # Self-explaining format: id=vin:N | addr=... | amt=...
+            vins.append(f"id={op_id} | addr={addr} | amt={amount}")
         elif op_id.startswith("vout:"):
-            idx = op_id.split(":")[1]
-            vouts.append(f"vout-{idx}:{addr}:{amount}")
+            # Self-explaining format: id=vout:N | addr=... | amt=...
+            vouts.append(f"id={op_id} | addr={addr} | amt={amount}")
 
     if vins:
         parts.append(f"[{', '.join(vins)}]")

@@ -32,9 +32,10 @@ FALLBACK_MAX_ERRORS = 50       # Fallback workflow error 上限
 
 # ==================== Tool Retry Config ====================
 
-TOOL_MAX_RETRIES = 3           # API 调用最大重试次数（不包括首次尝试）
-TOOL_RETRY_BACKOFF_BASE = 2    # 指数退避基数（秒），第 n 次重试等待 base^n 秒
-TOOL_TIMEOUT = 30              # 单次 API 调用超时时间（秒）
+TOOL_MAX_RETRIES = 3            # API 调用最大重试次数（不包括首次尝试）
+TOOL_RETRY_BACKOFF_BASE = 2     # 指数退避基数（秒），第 n 次重试等待 base^n 秒
+TOOL_TIMEOUT = 30               # 单次 API 调用超时时间（秒）
+RETRY_AFTER_MAX_WAIT = 600      # Retry-After header 最大等待时间（秒），10分钟上限避免hang
 
 
 # ==================== Cache Config ====================
@@ -123,20 +124,8 @@ def get_tracetx_check_time_window(anchor_time: int, time_span: int) -> tuple[int
 
 # ==================== API Keys (from environment variables) ====================
 
-# BTC/DOGE APIs
-BLOCKCYPHER_TOKEN = os.getenv("BLOCKCYPHER_TOKEN", "")
+# Blockchain Data APIs
 BLOCKCHAIR_API_KEY = os.getenv("BLOCKCHAIR_API_KEY", "")
-BITQUERY_API_KEY = os.getenv("BITQUERY_API_KEY", "")
-
-# ETH APIs
-ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY", "")
-ALCHEMY_API_KEY = os.getenv("ALCHEMY_API_KEY", "")
-INFURA_PROJECT_ID = os.getenv("INFURA_PROJECT_ID", "")
-
-# Price/Exchange rate APIs (for cross-chain amount matching)
-# Binance: 无需 API key，完全免费
-CRYPTOCOMPARE_API_KEY = os.getenv("CRYPTOCOMPARE_API_KEY", "")  # Optional, 备用方案
-
 
 # ==================== LLM Config ====================
 
@@ -319,8 +308,3 @@ def setup_logging():
 LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 LOG_DATE_FORMAT = "%H:%M:%S"  # Only show time (HH:MM:SS), no date or milliseconds
 
-
-# ==================== Development/Debug Config ====================
-
-DEBUG_MODE = os.getenv("DEBUG_MODE", "false").lower() == "true"
-VERBOSE_ERRORS = DEBUG_MODE  # 是否在 error 中包含完整 traceback

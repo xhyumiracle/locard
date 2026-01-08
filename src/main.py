@@ -84,7 +84,7 @@ def run_interactive():
             break
         except Exception as e:
             print(f"\nError: {e}")
-            if config.DEBUG_MODE:
+            if config.VERBOSE_LEVEL >= 2:
                 import traceback
                 traceback.print_exc()
 
@@ -124,21 +124,13 @@ def run_example():
     print("-" * 60)
     print("Processing...\n")
 
-    try:
-        response = run_single_query(example_query)
-        print("\nResponse:")
-        print("-" * 60)
-        print(response)
-        print("-" * 60)
+    response = run_single_query(example_query)
+    print("\nResponse:")
+    print("-" * 60)
+    print(response)
+    print("-" * 60)
 
-        print("\nExpected: Should identify DOGE tx 71B1ED1276B53803272A0E2F0860961F4BE0B49CCF72415210BB2EEAAFF6C3D0")
-
-    except Exception as e:
-        print(f"\nError running example: {e}")
-        if config.DEBUG_MODE:
-            import traceback
-            traceback.print_exc()
-        return 1
+    print("\nExpected: Should identify DOGE tx 71B1ED1276B53803272A0E2F0860961F4BE0B49CCF72415210BB2EEAAFF6C3D0")
 
     return 0
 
@@ -202,7 +194,7 @@ def run_batch(batch_file: str) -> int:
                 print(f"\nGround Truth: {groundtruth}")
         except Exception as e:
             print(f"\nError: {e}")
-            if config.DEBUG_MODE:
+            if config.VERBOSE_LEVEL >= 2:
                 import traceback
                 traceback.print_exc()
             errors += 1

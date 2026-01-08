@@ -98,10 +98,28 @@ class EthCall(BaseModel):
     transferred: bool = True  # Whether ETH was actually transferred
     block_time: Optional[int] = None
 
+class Eth3xplTransfer(BaseModel):
+    """ETH transfer event from 3xpl ClickHouse (simplified, single-side view).
+
+    3xpl's events table stores each transfer as two events (sender + recipient).
+    This model represents the recipient side (incoming transfer) for cross-chain matching.
+
+    Similar to UtxoOutput - contains only vout (recipient) information.
+    """
+    chain: str  # Always "ETH"
+    txid: str   # Transaction hash
+    recipient: str  # Recipient address
+    amount: float = 0  # In ETH (not wei)
+    block_time: int  # Unix timestamp
+
+    # Optional fields from 3xpl
+    module: str = "ethereum-main"  # Module identifier
+    block: Optional[int] = None  # Block number
+
 class PriceRange(BaseModel):
     price_min: float
     price_max: float
     via: Optional[str]
 
 
-ToolTx = Union[UtxoTx, AccountTx, UtxoOutput, EthCall]
+ToolTx = Union[UtxoTx, AccountTx, UtxoOutput, EthCall, Eth3xplTransfer]

@@ -69,23 +69,16 @@ def calculate_hit_rate(
         src_transfer = candidate.get("src_transfer", {})
         src_txid = normalize_txhash(src_transfer.get("txid", ""))
 
-        logger.debug(f"Candidate {i}: src_txid={src_txid[:16]}... vs gt={gt_normalized[:16]}...")
+        # logger.debug(f"Candidate {i}: src_txid={src_txid[:16]}... vs gt={gt_normalized[:16]}...")
 
         if src_txid == gt_normalized:
             predicted_rank = i
-            logger.debug(f"Match found at rank {i}")
             break
 
     # Calculate hit@k for each k
     hit_at_k = {}
     for k in k_values:
         hit_at_k[k] = predicted_rank is not None and predicted_rank <= k
-
-    logger.debug(
-        f"Ground truth: {gt_normalized[:8]}... "
-        f"Rank: {predicted_rank or 'NOT_FOUND'} "
-        f"Hit@1={hit_at_k.get(1, False)}"
-    )
 
     return MetricResult(
         hit_at_k=hit_at_k,
@@ -116,16 +109,28 @@ def aggregate_metrics(results: List[MetricResult]) -> Dict[str, Any]:
     """
     if not results:
         return {
+            "summary": {
+                "evaluated_cases": 0,
+                "found_cases": 0,
+                "found_rate": 0.0
+            },
             "hit_rates": {},
             "hit_counts": {},
-            "mrr": 0.0,
-            "found_rate": 0.0,
-            "avg_initial_candidates": 0.0,
-            "avg_valid_candidates": 0.0,
-            "total_queries": 0,
-            "found_count": 0,
-            "rank_details": [],
-            "rank_stats": {}
+            "ranking": {
+                "mrr": 0.0,
+                "mean_rank": 0.0,
+                "median_rank": 0.0,
+                "min_rank": 0,
+                "max_rank": 0,
+                "found_cases": 0
+            },
+            "candidates": {
+                "avg_initial": 0.0,
+                "avg_valid": 0.0
+            },
+            "details": {
+                "rank_list": []
+            }
         }
 
     total_queries = len(results)
@@ -144,6 +149,12 @@ def aggregate_metrics(results: List[MetricResult]) -> Dict[str, Any]:
         hit_counts[k] = hits
         hit_rates[k] = hits / total_queries
 
+    # Add "found" (no top-k limit) to hit_rates and hit_counts
+    found_count = sum(1 for r in results if r["predicted_rank"] is not None)
+    found_rate = found_count / total_queries
+    hit_counts["found"] = found_count
+    hit_rates["found"] = found_rate
+
     # Calculate MRR (Mean Reciprocal Rank)
     reciprocal_ranks = []
     for result in results:
@@ -153,10 +164,6 @@ def aggregate_metrics(results: List[MetricResult]) -> Dict[str, Any]:
         else:
             reciprocal_ranks.append(0.0)
     mrr = sum(reciprocal_ranks) / len(reciprocal_ranks)
-
-    # Calculate found rate
-    found_count = sum(1 for r in results if r["predicted_rank"] is not None)
-    found_rate = found_count / total_queries
 
     # Calculate average candidates (initial and valid)
     avg_initial_candidates = sum(r["total_candidates"] for r in results) / total_queries
@@ -187,17 +194,30 @@ def aggregate_metrics(results: List[MetricResult]) -> Dict[str, Any]:
             "count": len(valid_ranks)
         }
 
+    # Return structured metrics
     return {
+        "summary": {
+            "evaluated_cases": total_queries,
+            "found_cases": found_count,
+            "found_rate": found_rate
+        },
         "hit_rates": hit_rates,
         "hit_counts": hit_counts,
-        "mrr": mrr,
-        "found_rate": found_rate,
-        "avg_initial_candidates": avg_initial_candidates,
-        "avg_valid_candidates": avg_valid_candidates,
-        "total_queries": total_queries,
-        "found_count": found_count,
-        "rank_details": rank_details,
-        "rank_stats": rank_stats
+        "ranking": {
+            "mrr": mrr,
+            "mean_rank": rank_stats.get("mean", 0.0),
+            "median_rank": rank_stats.get("median", 0.0),
+            "min_rank": rank_stats.get("min", 0),
+            "max_rank": rank_stats.get("max", 0),
+            "found_cases": rank_stats.get("count", 0)
+        },
+        "candidates": {
+            "avg_initial": avg_initial_candidates,
+            "avg_valid": avg_valid_candidates
+        },
+        "details": {
+            "rank_list": rank_details
+        }
     }
 
 
