@@ -13,12 +13,54 @@ from openai import RateLimitError, APIError, APIConnectionError, APITimeoutError
 import httpx
 
 import config
+from src.tools.base import calculate_backoff_time, extract_retry_after_header
 
 logger = logging.getLogger(__name__)
 
 
 class ChatOpenAIWithRetry(ChatOpenAI):
     """ChatOpenAI subclass with enhanced retry logic for transient errors."""
+
+    def _retry_with_backoff(
+        self,
+        error_type: str,
+        error_str: str,
+        attempt: int,
+        max_attempts: int,
+        wait_time: float | None = None
+    ) -> None:
+        """
+        Log and sleep before retry, or raise if max attempts reached.
+
+        Args:
+            error_type: Human-readable error type (e.g., "Rate limit", "Connection error")
+            error_str: Full error message
+            attempt: Current attempt number (0-indexed)
+            max_attempts: Maximum number of attempts
+            wait_time: Custom wait time (if None, use exponential backoff)
+
+        Raises:
+            Exception if max attempts reached
+        """
+        if attempt >= max_attempts - 1:
+            logger.error(f"{error_type} after {max_attempts} attempts: {error_str}")
+            raise
+
+        # Use provided wait_time or calculate exponential backoff
+        if wait_time is None:
+            # No server suggestion - use exponential backoff
+            # LLM retry uses base=5 for longer waits than tool retry (base=2)
+            wait_time = calculate_backoff_time(attempt, base=5.0, max_wait=120.0)
+        else:
+            # Server suggested wait time via Retry-After header (RFC 7231)
+            # Respect server's request but cap to avoid hanging indefinitely
+            wait_time = min(wait_time, config.RETRY_AFTER_MAX_WAIT)
+
+        logger.warning(
+            f"{error_type} (attempt {attempt + 1}/{max_attempts}), "
+            f"waiting {wait_time:.1f}s before retry. Error: {error_str}"
+        )
+        time.sleep(wait_time)
 
     def invoke(self, *args, **kwargs) -> Any:
         """
@@ -61,88 +103,34 @@ class ChatOpenAIWithRetry(ChatOpenAI):
                     raise ValueError(f"Unknown rate limit error: {error_str}") from e
 
                 # Standard rate limit (TPM/RPM) - retry with backoff
-                if attempt == max_outer_attempts - 1:
-                    logger.error(f"Rate limit exceeded after {max_outer_attempts} attempts")
-                    raise
-
-                # Try to extract Retry-After from exception or response
+                # Try to extract Retry-After from server response
                 wait_time = None
                 if hasattr(e, 'response') and e.response:
-                    # Check for Retry-After header
-                    retry_after = e.response.headers.get('retry-after')
-                    if retry_after:
-                        try:
-                            wait_time = float(retry_after)
-                            logger.info(f"Using Retry-After header: {wait_time}s")
-                        except ValueError:
-                            pass
+                    wait_time = extract_retry_after_header(e.response.headers)
+                    if wait_time:
+                        logger.info(f"Using Retry-After header: {wait_time}s")
 
-                    # Fallback: parse x-ratelimit-reset-tokens (e.g., "33.519s")
-                    if not wait_time:
-                        reset_tokens = e.response.headers.get('x-ratelimit-reset-tokens', '')
-                        if reset_tokens.endswith('s'):
-                            try:
-                                wait_time = float(reset_tokens.rstrip('s'))
-                                logger.info(f"Using x-ratelimit-reset-tokens: {wait_time}s")
-                            except ValueError:
-                                pass
-
-                # Fallback to exponential backoff if no header info
-                if not wait_time:
-                    wait_time = min(5 * (2 ** attempt), 60)
-                    logger.info(f"No Retry-After header, using exponential backoff: {wait_time}s")
-
-                # Cap at 2 minutes to avoid excessive waits
-                wait_time = min(wait_time, 120)
-
-                logger.warning(
-                    f"Rate limited (attempt {attempt + 1}/{max_outer_attempts}), "
-                    f"waiting {wait_time:.1f}s before retry. Error: {error_str}"
-                )
-                time.sleep(wait_time)
+                self._retry_with_backoff("Rate limit", error_str, attempt, max_outer_attempts, wait_time)
+            except (APIConnectionError, APITimeoutError) as e:
+                # Connection and timeout errors are transient - retry with backoff
+                # IMPORTANT: Must catch these BEFORE APIError since they may inherit from it
+                error_type = type(e).__name__
+                error_str = str(e)
+                self._retry_with_backoff(error_type, error_str, attempt, max_outer_attempts)
             except APIError as e:
                 error_str = str(e)
                 status_code = getattr(e, 'status_code', None)
 
                 # Whitelist: Only retry transient 5xx server errors
-                # 500: Internal Server Error
-                # 502: Bad Gateway
-                # 503: Service Unavailable
-                # 504: Gateway Timeout
+                # 500: Internal Server Error, 502: Bad Gateway
+                # 503: Service Unavailable, 504: Gateway Timeout
                 if status_code in (500, 502, 503, 504):
-                    if attempt == max_outer_attempts - 1:
-                        logger.error(f"Server error after {max_outer_attempts} attempts")
-                        raise
-
-                    wait_time = min(5 * (2 ** attempt), 60)
-                    logger.warning(
-                        f"Server error {status_code} (attempt {attempt + 1}/{max_outer_attempts}), "
-                        f"waiting {wait_time}s before retry. Error: {error_str}"
-                    )
-                    time.sleep(wait_time)
+                    self._retry_with_backoff(f"Server error {status_code}", error_str, attempt, max_outer_attempts)
                 else:
                     # Non-retryable errors (4xx client errors, auth, schema validation, etc.)
-                    # 400: Bad Request (schema errors, invalid params)
-                    # 401: Unauthorized (auth errors)
-                    # 403: Forbidden
-                    # 404: Not Found
+                    # 400: Bad Request, 401: Unauthorized, 403: Forbidden, 404: Not Found
                     logger.error(f"Non-retryable API error (status {status_code}): {error_str}")
                     raise
-            except (APIConnectionError, APITimeoutError) as e:
-                # Connection and timeout errors are transient - retry with backoff
-                error_str = str(e)
-                error_type = type(e).__name__
-
-                if attempt == max_outer_attempts - 1:
-                    logger.error(f"{error_type} after {max_outer_attempts} attempts: {error_str}")
-                    raise
-
-                wait_time = min(5 * (2 ** attempt), 60)
-                logger.warning(
-                    f"{error_type} (attempt {attempt + 1}/{max_outer_attempts}), "
-                    f"waiting {wait_time}s before retry. Error: {error_str}"
-                )
-                time.sleep(wait_time)
 
 
 def create_chat_openai_with_retry(

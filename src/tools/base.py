@@ -109,17 +109,91 @@ T = TypeVar("T")
 _rate_limit_tracker: Dict[str, int] = {}
 
 
-class BlockchainAPIError(Exception):
-    """Base exception for blockchain API errors."""
-    pass
+def calculate_backoff_time(
+    attempt: int,
+    base: float = config.TOOL_RETRY_BACKOFF_BASE,
+    max_wait: float = 60.0
+) -> float:
+    """
+    Calculate exponential backoff wait time.
+
+    Args:
+        attempt: Current attempt number (0-indexed)
+        base: Backoff base (default from config.TOOL_RETRY_BACKOFF_BASE)
+        max_wait: Maximum wait time in seconds (default 60s)
+
+    Returns:
+        Wait time in seconds: min(base^attempt, max_wait)
+
+    Example:
+        - attempt=0, base=2: 1s   (2^0)
+        - attempt=1, base=2: 2s   (2^1)
+        - attempt=2, base=2: 4s   (2^2)
+        - attempt=3, base=2: 8s   (2^3)
+        - attempt=4, base=5: 25s  (5^2, with base=5 from LLM)
+        - attempt=5, base=5: 60s  (capped at max_wait)
+    """
+    return min(base ** attempt, max_wait)
 
 
-class TransientError(BlockchainAPIError):
-    """Retryable error (timeout, rate limit, 5xx)."""
-    pass
+def extract_retry_after_header(headers: Dict[str, str]) -> Optional[float]:
+    """
+    Extract Retry-After wait time from HTTP headers (RFC 7231).
+
+    Supports:
+    - Retry-After: 120 (seconds as integer)
+    - Retry-After: 33.5 (seconds as float)
+    - x-ratelimit-reset-tokens: 33.519s (OpenAI custom format)
+
+    Args:
+        headers: HTTP response headers dict
+
+    Returns:
+        Wait time in seconds if found, None otherwise
+
+    Example:
+        >>> extract_retry_after_header({'retry-after': '60'})
+        60.0
+        >>> extract_retry_after_header({'Retry-After': '33.5'})
+        33.5
+        >>> extract_retry_after_header({'x-ratelimit-reset-tokens': '33.519s'})
+        33.519
+        >>> extract_retry_after_header({})
+        None
+    """
+    # Standard HTTP Retry-After header (case-insensitive)
+    retry_after = headers.get('retry-after') or headers.get('Retry-After')
+    if retry_after:
+        try:
+            return float(retry_after)
+        except (ValueError, TypeError):
+            # Retry-After might be HTTP-date format, not supported yet
+            pass
+
+    # OpenAI custom header: x-ratelimit-reset-tokens (e.g., "33.519s")
+    reset_tokens = headers.get('x-ratelimit-reset-tokens', '')
+    if reset_tokens.endswith('s'):
+        try:
+            return float(reset_tokens.rstrip('s'))
+        except (ValueError, TypeError):
+            pass
+
+    return None
 
 
-class FatalError(BlockchainAPIError):
+class TransientError(Exception):
+    """
+    Retryable error (timeout, rate limit, 5xx).
+
+    Attributes:
+        retry_after: Optional suggested wait time in seconds (from Retry-After header)
+    """
+    def __init__(self, message: str, retry_after: Optional[float] = None):
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
+class FatalError(Exception):
     """Non-retryable error (tx not found, invalid hash)."""
     pass
 
@@ -152,9 +226,8 @@ def with_retry(
     transient_exceptions: tuple = (
         httpx.TimeoutException,
         httpx.ConnectError,      # Connection errors (DNS, refused, etc.)
-        httpx.HTTPStatusError,   # HTTP 4xx/5xx errors
         ssl.SSLError,            # SSL/TLS errors (may not be wrapped by httpx)
-        TransientError
+        TransientError           # Our custom transient errors (429, 5xx) from _handle_response
     )
 ) -> Callable:
     """
@@ -162,6 +235,11 @@ def with_retry(
 
     Only retries transient errors; fatal errors propagate immediately.
     Uses whitelist approach - only known transient errors are retried.
+
+    Note: httpx.HTTPStatusError is NOT in the whitelist because:
+    - Most 4xx errors are fatal (400, 401, 403, 404)
+    - API clients should use _handle_response() to classify HTTP errors into
+      TransientError (429, 5xx) or FatalError (4xx) properly
     """
     def decorator(func: Callable[..., T]) -> Callable[..., T]:
         @wraps(func)
@@ -174,19 +252,30 @@ def with_retry(
                 except transient_exceptions as e:
                     last_error = e
                     if attempt < max_retries:
-                        wait_time = backoff_base ** attempt
+                        # Check if TransientError has server-suggested retry_after
+                        if isinstance(e, TransientError) and e.retry_after:
+                            # Respect server's suggestion but cap to avoid hanging
+                            wait_time = min(e.retry_after, config.RETRY_AFTER_MAX_WAIT)
+                            logger.info(f"Using server-suggested Retry-After: {wait_time}s")
+                        else:
+                            # Use exponential backoff
+                            wait_time = calculate_backoff_time(attempt, backoff_base)
+
                         logger.warning(
-                            f"{func.__name__} attempt {attempt + 1} failed: {e}. "
-                            f"Retrying in {wait_time}s..."
+                            f"{func.__name__} attempt {attempt + 1}/{max_retries + 1} failed: {e}. "
+                            f"Retrying in {wait_time:.1f}s..."
                         )
                         time.sleep(wait_time)
                     else:
                         logger.error(f"{func.__name__} failed after {max_retries + 1} attempts")
                         raise TransientError(f"Max retries exceeded: {e}") from e
                 except FatalError:
+                    # Fatal errors should not be retried
                     raise
 
-            raise last_error or TransientError("Unknown error")
+            # This should never be reached (all paths return or raise)
+            # But keep as safety net - if we get here, last_error must exist
+            raise TransientError(f"Retry loop exhausted: {last_error}") from last_error
 
         return wrapper
     return decorator
@@ -240,35 +329,37 @@ class BaseAPIClient:
         self.client = LoggingHTTPClient(self._raw_client, self.SOURCE_NAME)
 
     def _handle_response(self, response: httpx.Response) -> dict:
-        """Handle HTTP response, raising appropriate exceptions."""
-        if response.status_code == 400:
-            # Bad request (invalid params, symbol not found) - don't retry
-            raise FatalError(f"Bad request: {response.url}")
-        if response.status_code == 404:
-            raise FatalError(f"Resource not found: {response.url}")
+        """
+        Handle HTTP response, classifying errors we need to handle specially.
+
+        Responsibility: Error classification ONLY. Does not perform retry or sleep.
+        Retry logic is handled by @with_retry decorator.
+
+        Classification strategy:
+        - 429: Wrap as TransientError with retry_after metadata
+        - 5xx: Wrap as TransientError (server errors are retryable)
+        - Other 4xx: Let httpx.HTTPStatusError propagate (will NOT be retried)
+        - Unknown: Let raise_for_status() handle it
+
+        Raises:
+            TransientError: Retryable errors (429 rate limit, 5xx server errors)
+            httpx.HTTPStatusError: Client errors (4xx) - NOT retried
+        """
+        # 429 rate limit (transient - should retry with server-suggested wait time)
         if response.status_code == 429:
-            # Track rate limits and stop if too many
             record_rate_limit(self.SOURCE_NAME)
-
-            # Check for Retry-After header (standard HTTP)
-            retry_after = response.headers.get('retry-after') or response.headers.get('Retry-After')
+            # Extract Retry-After and attach to exception for @with_retry to use
+            retry_after = extract_retry_after_header(response.headers)
             if retry_after:
-                try:
-                    wait_seconds = float(retry_after)
-                    # Cap at 5 minutes to avoid hanging
-                    wait_seconds = min(wait_seconds, 300)
-                    logger.warning(
-                        f"{self.SOURCE_NAME} rate limited - API suggests retry after {wait_seconds}s"
-                    )
-                    time.sleep(wait_seconds)
-                    raise TransientError(f"Rate limit (waited {wait_seconds:.1f}s as suggested by API)")
-                except (ValueError, TypeError):
-                    # Retry-After might be HTTP-date format, ignore for now
-                    pass
+                logger.debug(f"{self.SOURCE_NAME} rate limited - server suggests {retry_after}s")
+            raise TransientError("Rate limit exceeded", retry_after=retry_after)
 
-            raise TransientError("Rate limit exceeded")
+        # 5xx server errors (transient - should retry)
         if response.status_code >= 500:
             raise TransientError(f"Server error: {response.status_code}")
+
+        # Success or other errors (4xx) - let httpx handle it
+        # This will raise httpx.HTTPStatusError for 4xx, which is NOT in transient_exceptions
         response.raise_for_status()
         return response.json()
 

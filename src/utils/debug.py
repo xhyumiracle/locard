@@ -10,9 +10,35 @@ Verbosity levels:
 
 import json
 import logging
-from typing import List, Any
+from typing import List, Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
+
+# Cache system prompts at module initialization (content -> prompt name)
+_SYSTEM_PROMPTS: Dict[str, str] = {}
+
+def _load_system_prompts():
+    """Load all system prompts once at module initialization."""
+    from src.prompts.loader import load_prompt, PROMPTS_DIR
+
+    if not PROMPTS_DIR.exists():
+        return
+
+    for prompt_file in PROMPTS_DIR.glob("*.md"):
+        try:
+            name = prompt_file.stem
+            content = load_prompt(name)  # Use loader to benefit from lru_cache
+            _SYSTEM_PROMPTS[content] = name
+        except Exception:
+            pass
+
+# Initialize once on module load
+_load_system_prompts()
+
+
+def _get_prompt_name(content: str) -> Optional[str]:
+    """Check if content is a system prompt and return its name."""
+    return _SYSTEM_PROMPTS.get(content.strip())
 
 
 def _format_messages(messages: list, max_len: int = None) -> str:
@@ -41,13 +67,17 @@ def _format_messages(messages: list, max_len: int = None) -> str:
             if tool_call_id:
                 msg_type = f"tool:{tool_name}[{tool_call_id}]"
 
-        # No truncation for debug output - show everything
-
-        # Indent multiline content
+        # Check if this is a system prompt and abbreviate it
         if isinstance(content, str):
-            content_lines = content.split("\n")
-            if len(content_lines) > 1:
-                content = content_lines[0] + "\n" + "\n".join("    " + l for l in content_lines[1:])
+            prompt_name = _get_prompt_name(content)
+            if prompt_name:
+                # Replace full prompt with abbreviated reference
+                content = f"<System Prompt: {prompt_name}.md>"
+            else:
+                # Indent multiline content for non-prompts
+                content_lines = content.split("\n")
+                if len(content_lines) > 1:
+                    content = content_lines[0] + "\n" + "\n".join("    " + l for l in content_lines[1:])
 
         lines.append(f"  [{msg_type}] {content}")
 
