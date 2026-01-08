@@ -105,6 +105,13 @@ Examples:
         help="Force overwrite existing results (only for score/evaluate modes, candidate never overwrites)"
     )
 
+    parser.add_argument(
+        "--continue",
+        action="store_true",
+        dest="continue_mode",
+        help="Continue mode - append to existing work directory (allows incremental runs)"
+    )
+
     args = parser.parse_args()
 
     # Override VERBOSE_LEVEL from command line args (highest priority)
@@ -150,7 +157,8 @@ Examples:
             limit=args.limit,
             offset=args.offset,
             verbose=not args.quiet,
-            force=args.force
+            force=args.force,
+            continue_mode=args.continue_mode
         )
         sys.exit(0)
     except Exception as e:

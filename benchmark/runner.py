@@ -12,6 +12,7 @@ Modes can be chained together or run independently.
 import json
 import logging
 import time
+import sys
 from pathlib import Path
 from typing import List, Literal
 from datetime import datetime
@@ -27,6 +28,25 @@ import config
 
 
 logger = logging.getLogger(__name__)
+
+
+class TeeOutput:
+    """Redirect stdout/stderr to both console and file."""
+    def __init__(self, file_path: Path, original_stream):
+        self.file = open(file_path, 'w', encoding='utf-8')
+        self.original_stream = original_stream
+
+    def write(self, message):
+        self.original_stream.write(message)
+        self.file.write(message)
+        self.file.flush()
+
+    def flush(self):
+        self.original_stream.flush()
+        self.file.flush()
+
+    def close(self):
+        self.file.close()
 
 BenchmarkMode = Literal["candidate", "score", "evaluate"]
 
@@ -60,7 +80,8 @@ class BenchmarkRunner:
         output_dir: Path,
         modes: List[BenchmarkMode] = None,
         verbose: bool = True,
-        force: bool = False
+        force: bool = False,
+        continue_mode: bool = False
     ):
         """
         Initialize benchmark runner.
@@ -70,6 +91,7 @@ class BenchmarkRunner:
             modes: List of modes to execute in order (default: all three)
             verbose: Print progress to console
             force: Force overwrite for score/evaluate modes (candidate never overwrites)
+            continue_mode: Continue mode - append to existing work directory
 
         Raises:
             ValueError: If candidate mode and output_dir is not empty
@@ -78,50 +100,63 @@ class BenchmarkRunner:
         self.modes = modes or ["candidate", "score", "evaluate"]
         self.verbose = verbose
         self.force = force
+        self.continue_mode = continue_mode
 
         # Check output directory based on modes
-        if self.output_dir.exists():
-            # Candidate mode: NEVER overwrite, always require empty directory
+        if continue_mode:
+            # Continue mode: work directory must exist
+            if not self.output_dir.exists():
+                raise ValueError(
+                    f"--continue requires existing work directory: {self.output_dir}\n"
+                    f"The directory does not exist. Please check the path."
+                )
+        elif self.output_dir.exists():
+            # Directory exists - give helpful hints and exit gracefully
             if "candidate" in self.modes:
                 if any(self.output_dir.iterdir()):
-                    raise ValueError(
-                        f"Output directory is not empty: {self.output_dir}\n"
-                        f"Candidate mode requires an empty directory (to protect expensive API calls).\n"
-                        f"Please use a different directory or remove existing files."
-                    )
-            # Score/Evaluate modes: Check if force is needed
+                    # Check if there are existing results
+                    results_dir = self.output_dir / "results"
+                    has_results = results_dir.exists() and any(results_dir.iterdir())
+
+                    if has_results:
+                        print(f"💡 Work directory already contains results: {self.output_dir}")
+                        print(f"   To add more cases, use: --continue")
+                        print(f"   To overwrite existing cases, use: --continue --force")
+                        import sys
+                        sys.exit(0)
+            # Score/Evaluate modes: Give hint if not using force
             elif not force:
                 # Check if results directory exists and has content
                 results_dir = self.output_dir / "results"
                 if results_dir.exists() and any(results_dir.iterdir()):
-                    raise ValueError(
-                        f"Output directory already contains results: {self.output_dir}\n"
-                        f"Score/evaluate modes will overwrite existing score_table.json and metrics.json files.\n"
-                        f"Use --force to proceed with overwriting, or use a different directory."
-                    )
+                    print(f"💡 Overwriting existing score_table.json and metrics.json files")
+                    print(f"   Use --force to confirm overwriting")
+                    import sys
+                    sys.exit(0)
         else:
             self.output_dir.mkdir(parents=True, exist_ok=True)
 
         # Directory structure:
         # results/{query_id}/agent.log, candidate_cclinks.json, score_table.json, metrics.json
-        # run_info.json, summary_aggregated_metrics.json (at root)
+        # run_info.json, overall_metrics.json (at root)
         self.results_dir = self.output_dir / "results"
         self.run_info_path = self.output_dir / "run_info.json"
-        self.aggregated_metrics_path = self.output_dir / "summary_aggregated_metrics.json"
+        self.overall_metrics_path = self.output_dir / "overall_metrics.json"
 
         # Create directories
         self.results_dir.mkdir(parents=True, exist_ok=True)
 
-        # Runtime execution info (per-mode timing, total stats)
-        self.run_info = {
-            "modes": [],  # List of modes executed
-            "timing": {},  # {mode: {start, end, execution_seconds}}
-            "candidate_stats": {  # Only for candidate mode
-                "total_queries": 0,
-                "completed": 0,
-                "failed": 0
+        # Load existing run_info if in continue mode
+        if continue_mode and self.run_info_path.exists():
+            with open(self.run_info_path, 'r', encoding='utf-8') as f:
+                self.run_info = json.load(f)
+        else:
+            # Initialize new run_info structure
+            self.run_info = {
+                "total_cases": 0,  # Total unique cases in work directory
+                "execution_time": 0.0,  # Cumulative execution time from all runs
+                "runs": []  # List of candidate mode runs
             }
-        }
 
         # Note: Per-query agent logging is set up dynamically during candidate mode execution
 
@@ -134,6 +169,27 @@ class BenchmarkRunner:
         results_dir = self.get_query_results_dir(query_id)
         results_dir.mkdir(parents=True, exist_ok=True)
         return results_dir / filename
+
+    def scan_existing_cases(self) -> set:
+        """
+        Scan results/ directory to get existing case IDs.
+
+        Returns:
+            Set of query_id strings that have results directories
+        """
+        if not self.results_dir.exists():
+            return set()
+
+        existing = set()
+        for item in self.results_dir.iterdir():
+            if item.is_dir():
+                existing.add(item.name)
+
+        return existing
+
+    def update_total_cases(self):
+        """Update total_cases in run_info by scanning results/ directory."""
+        self.run_info["total_cases"] = len(self.scan_existing_cases())
 
     def load_queries(self, yaml_path: Path) -> List[dict]:
         """
@@ -270,6 +326,29 @@ class BenchmarkRunner:
             logger.warning(f"No queries to process (offset={offset}, limit={limit}, total={len(all_queries)})")
             return
 
+        # Check for duplicates if in continue mode
+        existing_cases = self.scan_existing_cases()
+        query_ids_from_yaml = [q.get("metadata", {}).get("query_id") for q in queries if q.get("metadata", {}).get("query_id")]
+        duplicated_cases = [qid for qid in query_ids_from_yaml if qid in existing_cases]
+        new_cases = [qid for qid in query_ids_from_yaml if qid not in existing_cases]
+
+        # Handle duplicates in continue mode
+        if self.continue_mode:
+            if duplicated_cases and not self.force:
+                # Skip duplicates - filter to only new cases
+                queries = [q for q in queries if q.get("metadata", {}).get("query_id") in new_cases]
+            elif duplicated_cases and self.force:
+                # Overwrite duplicates - process all queries
+                if self.verbose:
+                    print(f"⚠️  Overwriting {len(duplicated_cases)} existing case(s)")
+            else:
+                # No duplicates - process all queries (which are all new)
+                pass
+
+        if not queries:
+            logger.warning(f"No new queries to process after filtering duplicates")
+            return
+
         mode_start = time.time()
         mode_start_iso = datetime.now().isoformat()
 
@@ -277,6 +356,8 @@ class BenchmarkRunner:
             print(f"\n{'=' * 60}")
             print(f"MODE: CANDIDATE - Extracting CCLinks")
             print(f"{'=' * 60}")
+            if self.continue_mode:
+                print(f"Continue mode: {len(existing_cases)} existing, {len(duplicated_cases)} duplicated, {len(new_cases)} new")
             if offset > 0 or limit:
                 print(f"Processing queries [{offset}:{end_idx}] ({len(queries)} queries)")
             else:
@@ -284,8 +365,10 @@ class BenchmarkRunner:
 
         logger.info(f"[candidate mode] Processing {len(queries)} queries (offset={offset}, limit={limit})")
 
-        # Track candidate stats
-        self.run_info["candidate_stats"]["total_queries"] = len(queries)
+        # Track stats for this run
+        processed_count = 0
+        completed_count = 0
+        failed_count = 0
 
         # Get graph
         graph = SUBGRAPH_MAP["tracetx"]
@@ -301,6 +384,8 @@ class BenchmarkRunner:
             if not query:
                 logger.info(f"[Query {query_id}] Skipped (empty)")
                 continue
+
+            processed_count += 1
 
             if self.verbose:
                 print(f"\n[{i}/{len(queries)}] Query {query_id[:16]}...: {query[:60]}...")
@@ -351,7 +436,7 @@ class BenchmarkRunner:
                 with open(result_path, 'w', encoding='utf-8') as f:
                     json.dump(result_data, f, indent=2, ensure_ascii=False)
 
-                self.run_info["candidate_stats"]["completed"] += 1
+                completed_count += 1
 
             except Exception as e:
                 execution_time = time.time() - start_time
@@ -378,7 +463,7 @@ class BenchmarkRunner:
                 with open(result_path, 'w', encoding='utf-8') as f:
                     json.dump(result_data, f, indent=2, ensure_ascii=False)
 
-                self.run_info["candidate_stats"]["failed"] += 1
+                failed_count += 1
 
             finally:
                 # Remove case-specific log handler
@@ -386,21 +471,35 @@ class BenchmarkRunner:
                 case_handler.close()
 
         mode_time = time.time() - mode_start
-        mode_end_iso = datetime.now().isoformat()
 
-        # Record timing for candidate mode
-        self.run_info["timing"]["candidate"] = {
-            "start": mode_start_iso,
-            "end": mode_end_iso,
+        # Update total_cases by scanning actual results
+        self.update_total_cases()
+
+        # Record this run
+        run_record = {
+            "timestamp": mode_start_iso,
+            "yaml_file": str(yaml_path),  # Store user-provided path (relative, not absolute)
+            "offset": offset,
+            "limit": limit,
+            "duplicated_cases": len(duplicated_cases),
+            "new_cases": len(new_cases),
+            "processed_cases": processed_count,
             "execution_seconds": mode_time
         }
-        self.run_info["modes"].append("candidate")
+        self.run_info["runs"].append(run_record)
+
+        # Update cumulative execution time
+        self.run_info["execution_time"] = sum(r["execution_seconds"] for r in self.run_info["runs"])
+
+        # Save run_info after candidate mode
+        self.save_run_info()
 
         if self.verbose:
             print(f"\n{'=' * 60}")
             print(f"CANDIDATE MODE COMPLETED in {mode_time:.2f}s")
-            print(f"Successful: {self.run_info['candidate_stats']['completed']}")
-            print(f"Failed: {self.run_info['candidate_stats']['failed']}")
+            print(f"Successful: {completed_count}")
+            print(f"Failed: {failed_count}")
+            print(f"Total cases in work directory: {self.run_info['total_cases']}")
             print(f"{'=' * 60}")
 
         logger.info(f"[candidate mode] Completed in {mode_time:.2f}s")
@@ -540,15 +639,12 @@ class BenchmarkRunner:
                 failed += 1
 
         mode_time = time.time() - mode_start
-        mode_end_iso = datetime.now().isoformat()
 
-        # Record timing for score mode
-        self.run_info["timing"]["score"] = {
-            "start": mode_start_iso,
-            "end": mode_end_iso,
-            "execution_seconds": mode_time
-        }
-        self.run_info["modes"].append("score")
+        # Update total_cases (in case score mode was run independently)
+        self.update_total_cases()
+
+        # Save run_info after score mode
+        self.save_run_info()
 
         if self.verbose:
             print(f"\n{'=' * 60}")
@@ -637,17 +733,24 @@ class BenchmarkRunner:
 
             metric_results.append(metric)
 
-            # Save individual metric (minimal info + ground_truth for manual inspection)
+            # Save per-case metric with detailed info
+            hit_at_k = metric["hit_at_k"]
             result_data = {
-                "query_id": query_id,
                 "ground_truth": ground_truth,
                 "predicted_rank": metric["predicted_rank"],
                 "total_candidates": metric["total_candidates"],
-                "valid_candidates": metric["valid_candidates"]
+                "valid_candidates": metric["valid_candidates"],
+                "hit_at_k": {str(k): v for k, v in hit_at_k.items()}  # Convert int keys to str for JSON
             }
             result_path = self.get_query_result_path(query_id, "metrics.json")
             with open(result_path, 'w', encoding='utf-8') as f:
                 json.dump(result_data, f, indent=2, ensure_ascii=False)
+
+            # Real-time update overall_metrics.json
+            aggregated = aggregate_metrics(metric_results)
+            aggregated["metadata"] = {"timestamp": datetime.now().isoformat()}
+            with open(self.overall_metrics_path, 'w', encoding='utf-8') as f:
+                json.dump(aggregated, f, indent=2, ensure_ascii=False)
 
             if self.verbose:
                 rank = metric["predicted_rank"]
@@ -655,8 +758,10 @@ class BenchmarkRunner:
                 if rank:
                     rank_str = f"#{rank}/{valid_count}"
                 else:
-                    rank_str = f"NOT_FOUND (out of {valid_count})"
-                print(f"[{query_id}] Ground truth rank: {rank_str}")
+                    rank_str = f"NOT_FOUND/{valid_count}"
+                # Format: [query_id] GT: HASH... Rank: #3/12
+                gt_short = ground_truth[:8] if ground_truth else "N/A"
+                print(f"[{query_id}] GT: {gt_short}... Rank: {rank_str}")
 
         # Calculate aggregated metrics
         if metric_results:
@@ -664,34 +769,38 @@ class BenchmarkRunner:
 
             if self.verbose:
                 print(f"\n{'=' * 60}")
-                print(f"AGGREGATED METRICS")
+                print(f"OVERALL METRICS")
                 print(f"{'=' * 60}")
-                print(f"Total evaluated: {len(metric_results)}")
-                print(f"Found rate: {aggregated['found_rate']:.2%} ({aggregated['found_count']}/{len(metric_results)})")
+                print(f"Evaluated: {aggregated['summary']['evaluated_cases']}")
+                print(f"Found: {aggregated['summary']['found_cases']} ({aggregated['summary']['found_rate']:.2%})")
 
                 print(f"\nTop-K Hit Rates:")
-                for k in sorted(aggregated['hit_rates'].keys()):
+                # Separate numeric keys and "found" key
+                numeric_keys = sorted([k for k in aggregated['hit_rates'].keys() if isinstance(k, int)])
+                for k in numeric_keys:
                     rate = aggregated['hit_rates'][k]
                     count = aggregated['hit_counts'][k]
                     print(f"  Top-{k:2d}: {rate:6.2%} ({count})")
+                # Show "found" at the end
+                if "found" in aggregated['hit_rates']:
+                    rate = aggregated['hit_rates']["found"]
+                    count = aggregated['hit_counts']["found"]
+                    print(f"  Found (all): {rate:6.2%} ({count})")
 
-                print(f"\nMRR: {aggregated['mrr']:.4f}")
-                print(f"Avg Initial Candidates: {aggregated['avg_initial_candidates']:.1f}")
-                print(f"Avg Valid Candidates: {aggregated['avg_valid_candidates']:.1f}")
+                print(f"\nRanking:")
+                print(f"  MRR: {aggregated['ranking']['mrr']:.4f}")
+                print(f"  Mean:   {aggregated['ranking']['mean_rank']:.2f}")
+                print(f"  Median: {aggregated['ranking']['median_rank']:.1f}")
+                print(f"  Min:    {aggregated['ranking']['min_rank']}")
+                print(f"  Max:    {aggregated['ranking']['max_rank']}")
 
-                # Display rank statistics
-                if aggregated['rank_stats']:
-                    print(f"\nRank Statistics (for found queries):")
-                    rank_stats = aggregated['rank_stats']
-                    print(f"  Mean:   {rank_stats['mean']:.2f}")
-                    print(f"  Median: {rank_stats['median']:.1f}")
-                    print(f"  Min:    {rank_stats['min']}")
-                    print(f"  Max:    {rank_stats['max']}")
-                    print(f"  Count:  {rank_stats['count']}")
+                print(f"\nCandidates:")
+                print(f"  Avg Initial: {aggregated['candidates']['avg_initial']:.1f}")
+                print(f"  Avg Valid:   {aggregated['candidates']['avg_valid']:.1f}")
 
-            # Save aggregated summary
-            aggregated["timestamp"] = datetime.now().isoformat()
-            with open(self.aggregated_metrics_path, 'w', encoding='utf-8') as f:
+            # Add metadata and save
+            aggregated["metadata"] = {"timestamp": datetime.now().isoformat()}
+            with open(self.overall_metrics_path, 'w', encoding='utf-8') as f:
                 json.dump(aggregated, f, indent=2, ensure_ascii=False)
 
         else:
@@ -699,15 +808,6 @@ class BenchmarkRunner:
                 print(f"\nNo valid cases to evaluate")
 
         mode_time = time.time() - mode_start
-        mode_end_iso = datetime.now().isoformat()
-
-        # Record timing for evaluate mode
-        self.run_info["timing"]["evaluate"] = {
-            "start": mode_start_iso,
-            "end": mode_end_iso,
-            "execution_seconds": mode_time
-        }
-        self.run_info["modes"].append("evaluate")
 
         if self.verbose:
             print(f"\n{'=' * 60}")
@@ -723,6 +823,32 @@ class BenchmarkRunner:
 
         logger.info(f"Run info saved to {self.run_info_path}")
 
+    def get_run_log_filename(self, yaml_path: Path, limit: int = None, offset: int = 0) -> str:
+        """
+        Generate log filename for this run.
+
+        Format: run_{filename_without_extension}[_limit{limit}][_offset{offset}].log
+
+        Example:
+            - run_cases_1_3.log
+            - run_cases_4_10_limit5.log
+            - run_cases_4_10_limit5_offset2.log
+        """
+        if yaml_path:
+            base_name = yaml_path.stem  # filename without extension
+        else:
+            base_name = "score"  # If no yaml (score-only mode)
+
+        parts = [f"run_{base_name}"]
+
+        if limit is not None:
+            parts.append(f"limit{limit}")
+
+        if offset > 0:
+            parts.append(f"offset{offset}")
+
+        return "_".join(parts) + ".log"
+
     def run_batch(self, yaml_path: Path, limit: int = None, offset: int = 0):
         """
         Run batch evaluation with selected modes.
@@ -736,7 +862,36 @@ class BenchmarkRunner:
         1. Validate that required input files exist
         2. Run each mode in order
         3. Save run_info.json with execution summary
+        4. Automatically save full log to run_{filename}.log
         """
+
+        # Setup full run log file (only for candidate mode)
+        tee_stdout = None
+        tee_stderr = None
+        original_stdout = None
+        original_stderr = None
+        run_log_handler = None
+
+        if "candidate" in self.modes and yaml_path:
+            log_filename = self.get_run_log_filename(yaml_path, limit, offset)
+            run_log_path = self.output_dir / log_filename
+
+            # Redirect stdout and stderr to capture all output
+            original_stdout = sys.stdout
+            original_stderr = sys.stderr
+            tee_stdout = TeeOutput(run_log_path, original_stdout)
+            sys.stdout = tee_stdout
+            sys.stderr = tee_stdout  # Also capture errors
+
+            # Also add logging handler for logger outputs
+            run_log_handler = logging.FileHandler(run_log_path, mode='a', encoding='utf-8')
+            run_log_handler.setLevel(logging.DEBUG)
+            run_log_handler.setFormatter(logging.Formatter(config.LOG_FORMAT, datefmt=config.LOG_DATE_FORMAT))
+            root_logger = logging.getLogger()
+            root_logger.addHandler(run_log_handler)
+
+            if self.verbose:
+                print(f"Full run log will be saved to: {log_filename}")
 
         if self.verbose:
             print(f"\n{'#' * 60}")
@@ -780,13 +935,27 @@ class BenchmarkRunner:
             print(f"\n{'#' * 60}")
             print(f"BENCHMARK COMPLETED")
             print(f"{'#' * 60}")
-            total_time = sum(t["execution_seconds"] for t in self.run_info["timing"].values())
-            print(f"Total time: {total_time:.2f}s")
-            print(f"Modes executed: {' -> '.join(self.run_info['modes'])}")
+            if self.run_info["runs"]:
+                print(f"Total candidate time: {self.run_info['execution_time']:.2f}s")
+                print(f"Total runs: {len(self.run_info['runs'])}")
+            print(f"Total cases: {self.run_info['total_cases']}")
             print(f"Results saved to: {self.output_dir}")
             print(f"{'#' * 60}")
 
         logger.info(f"Benchmark run completed")
+
+        # Restore stdout/stderr and close file handlers
+        if tee_stdout:
+            sys.stdout = original_stdout
+            sys.stderr = original_stderr
+            tee_stdout.close()
+            if self.verbose:
+                print(f"Full run log saved to: {run_log_path}")
+
+        if run_log_handler:
+            root_logger = logging.getLogger()
+            root_logger.removeHandler(run_log_handler)
+            run_log_handler.close()
 
 
 def run_benchmark(
@@ -796,7 +965,8 @@ def run_benchmark(
     limit: int = None,
     offset: int = 0,
     verbose: bool = True,
-    force: bool = False
+    force: bool = False,
+    continue_mode: bool = False
 ):
     """
     Convenience function to run benchmark.
@@ -809,12 +979,14 @@ def run_benchmark(
         offset: Skip first N queries (0-indexed)
         verbose: Print progress to console
         force: Force overwrite existing results (only for score/evaluate, candidate never overwrites)
+        continue_mode: Continue mode - append to existing work directory
     """
     runner = BenchmarkRunner(
         output_dir=Path(output_dir),
         modes=modes,
         verbose=verbose,
-        force=force
+        force=force,
+        continue_mode=continue_mode
     )
 
     runner.run_batch(yaml_path=Path(yaml_path) if yaml_path else None, limit=limit, offset=offset)
