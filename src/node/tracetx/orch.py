@@ -93,6 +93,16 @@ def orchestrator_node(state: TraceTxState) -> dict:
         updates["dst_info"] = dst_info_schema_to_state(result.dst_info)
     if result.src_info:
         updates["src_info"] = src_info_schema_to_state(result.src_info)
+
+    # Merge reflection update if provided
+    if result.reflection_update:
+        reflection = dict(state.get("reflection", {}))
+        for step_name, step_data in result.reflection_update.items():
+            if step_name not in reflection:
+                reflection[step_name] = {}
+            reflection[step_name].update(step_data)
+        updates["reflection"] = reflection
+
     return updates
 
 

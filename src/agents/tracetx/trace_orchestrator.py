@@ -14,6 +14,7 @@ from typing import Dict, List, Literal, Optional
 
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
 from pydantic import BaseModel, Field
+import yaml
 
 import config
 from src.agents.prompts import load_prompt
@@ -60,6 +61,14 @@ class TraceOrchestratorOutput(BaseModel):
     candidates_finding_ids: Optional[List[str]] = Field(default=None, description="Finding IDs of search_txs to use for candidates (e.g., ['search_txs:BTC@1757641622-1757642822'])")
     # candidates: Optional[List[CandidateOutput]] = Field(default=None, description="All source tx candidates")
     fail_reason: Optional[str] = Field(default=None, description="Why failed: no candidates, tool failure, etc.")
+
+    # Self-reflection tracking (optional)
+    reflection_update: Optional[Dict[str, Dict[str, bool]]] = Field(
+        default=None,
+        description="""Optional: Update reflection tracking for self-verification. Only records BEHAVIOR (whether tools were called), NOT results.
+        Example: {"step_2": {"tool_called": True, "verified": True}}
+        DO NOT include calculation results (window, windows) - extract those from findings."""
+    )
 
 
 class TraceOrchestratorAgent:
@@ -126,17 +135,17 @@ class TraceOrchestratorAgent:
                     param_strs.append(f"{key}={val}")
             context_parts.append(f"Params: {', '.join(param_strs)}")
 
-        derived = state.get("derived", {})
-        search_window = derived.get("search_window", {})
-        if search_window:
-            time_w = search_window.get("time")
-            amount_w = search_window.get("amount")
-            if time_w:
-                context_parts.append(f"Search Window - Time: {time_w['start_ts']} to {time_w['end_ts']}")
-            if amount_w:
-                asset = amount_w.get("asset", "")
-                asset_label = f" {asset}" if asset else ""
-                context_parts.append(f"Search Window - Amount: {amount_w['min']:.8f} to {amount_w['max']:.8f}{asset_label} (calculated from dst_amount * price)")
+        # derived = state.get("derived", {})
+        # search_window = derived.get("search_window", {})
+        # if search_window:
+        #     time_w = search_window.get("time")
+        #     amount_w = search_window.get("amount")
+        #     if time_w:
+        #         context_parts.append(f"Search Window - Time: {time_w['start_ts']} to {time_w['end_ts']}")
+        #     if amount_w:
+        #         asset = amount_w.get("asset", "")
+        #         asset_label = f" {asset}" if asset else ""
+        #         context_parts.append(f"Search Window - Amount: {amount_w['min']:.8f} to {amount_w['max']:.8f}{asset_label} (calculated from dst_amount * price)")
 
         trajectories = state.get("trajectories", [])
         if trajectories:
@@ -150,7 +159,13 @@ class TraceOrchestratorAgent:
         if findings:
             context_parts.append(f"Previous Findings ({len(findings)} total):\n")
             context_parts.append(format_findings(findings, indent=0))
-        
+
+        # Add reflection status
+        reflection = state.get("reflection", {})
+        if reflection:
+            reflection_str = yaml.dump(reflection, default_flow_style=False, sort_keys=False).rstrip()
+            context_parts.append(f"[Self-Reflection Status]\n{reflection_str}")
+
         if context_parts:
             context = "\n".join(context_parts)
             messages.append(HumanMessage(content=f"[Context]\n{context}"))

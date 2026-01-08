@@ -56,6 +56,15 @@ class TraceTxState(TypedDict, total=False):
     # derived["search_window"]["time"] = {"start_ts": int, "end_ts": int}
     # derived["search_window"]["amount"] = {"min": float, "max": float}
 
+    reflection: Dict[str, Any]
+    # Self-reflection tracking for orchestrator (behavior only, not results)
+    # reflection["step_1"] = {"dst_tx_fetched": bool}
+    # reflection["step_2"] = {"tool_called": bool, "verified": bool}
+    # reflection["step_3"] = {"tool_called": bool, "reused_step2_window": bool, "verified": bool}
+    # reflection["step_4"] = {"tool_called": bool, "verified": bool}
+    # reflection["notes"] = [str] - free text for issues/corrections
+    # DO NOT store calculation results (window, windows) - extract from findings instead
+
     # final results
     # transfers: Annotated[Dict[str, Dict[str, Transfer]], merge_nested_dict]  # [chain][transfer_id] -> Transfer
     cclinks: List[CrossChainLink]              # cross-chain links
@@ -107,6 +116,13 @@ def initialize_state(query: str) -> TraceTxState:
             "search_time_span": config.TRACETX_SEARCH_TIME_SPAN,
             "search_price_buffer": config.TRACETX_SEARCH_PRICE_BUFFER,
             "check_time_span": config.TRACETX_CHECK_TIME_SPAN,
+        },
+        "reflection": {
+            "step_1": {"dst_tx_fetched": False},
+            "step_2": {"tool_called": False, "verified": False},
+            "step_3": {"tool_called": False, "reused_step2_window": False, "verified": False},
+            "step_4": {"tool_called": False, "verified": False},
+            "notes": []
         },
     }
 
