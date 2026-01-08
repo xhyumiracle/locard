@@ -318,9 +318,3 @@ def setup_logging():
 
 LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 LOG_DATE_FORMAT = "%H:%M:%S"  # Only show time (HH:MM:SS), no date or milliseconds
-
-
-# ==================== Development/Debug Config ====================
-
-DEBUG_MODE = os.getenv("DEBUG_MODE", "false").lower() == "true"
-VERBOSE_ERRORS = DEBUG_MODE  # 是否在 error 中包含完整 traceback
