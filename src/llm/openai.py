@@ -1,7 +1,7 @@
 """
-LLM utilities with unified retry and rate limit handling.
+OpenAI LLM client with unified retry and rate limit handling.
 
-Provides helper functions for creating LLM instances with intelligent retry logic.
+Provides ChatOpenAI wrapper with intelligent retry logic for transient errors.
 """
 
 import logging
@@ -13,7 +13,7 @@ from openai import RateLimitError, APIError, APIConnectionError, APITimeoutError
 import httpx
 
 import config
-from src.tools.base import calculate_backoff_time, extract_retry_after_header
+from src.clients.base import calculate_backoff_time, extract_retry_after_header
 
 logger = logging.getLogger(__name__)
 

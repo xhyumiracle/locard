@@ -22,7 +22,7 @@ from src.tools.registry import get_trace_fetcher_tools
 from src.tools.state_tools import create_state_lookup_tool
 from src.prompts import load_prompt
 from src.utils.debug import print_messages, print_structure_output
-from src.utils.llm import create_chat_openai_with_retry
+from src.llm import create_chat_openai_with_retry
 from src.utils.string import is_numeric_like
 
 

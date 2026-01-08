@@ -14,7 +14,7 @@ from langchain_core.tools import tool
 
 import config
 from config import is_utxo_chain, get_asset_unit
-from src.tools.base import BaseAPIClient, with_retry, cached, QuotaExhaustedError
+from src.clients.base import BaseAPIClient, with_retry, cached, QuotaExhaustedError
 from src.tools.models import UtxoTx, UtxoOutput, AccountTx, Vin, Vout, EthCall
 from src.tools.filters import filter_txs, filter_tx_by_address_direction
 

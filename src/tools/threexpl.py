@@ -12,7 +12,7 @@ from typing import List, Dict, Any
 import httpx
 from langchain_core.tools import tool
 
-from src.tools.base import with_retry, cached, TransientError, FatalError, LoggingHTTPClient
+from src.clients.base import with_retry, cached, TransientError, FatalError, LoggingHTTPClient
 from src.tools.models import Eth3xplTransfer
 
 logger = logging.getLogger(__name__)

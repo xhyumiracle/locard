@@ -22,7 +22,7 @@ from langchain_core.tools import tool
 from pydantic import BaseModel
 import httpx
 
-from src.tools.base import BaseAPIClient, with_retry, FatalError, TransientError, cached, record_rate_limit
+from src.clients.base import BaseAPIClient, with_retry, FatalError, TransientError, cached, record_rate_limit
 from src.tools.models import PriceRange
 
 logger = logging.getLogger(__name__)
