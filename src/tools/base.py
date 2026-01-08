@@ -6,6 +6,7 @@ import time
 import logging
 import json
 import hashlib
+import ssl
 from pathlib import Path
 from typing import Any, Callable, TypeVar, Optional, Dict
 from functools import wraps
@@ -104,9 +105,8 @@ def cached(source: str = "default", model: type = None):
 
 T = TypeVar("T")
 
-# Global rate limit tracker - stops program after too many 429s
+# Global rate limit tracker - for statistics and debugging
 _rate_limit_tracker: Dict[str, int] = {}
-_RATE_LIMIT_THRESHOLD = 3  # Stop after 3 consecutive 429s from same source
 
 
 class BlockchainAPIError(Exception):
@@ -124,30 +124,21 @@ class FatalError(BlockchainAPIError):
     pass
 
 
-class RateLimitExceededError(FatalError):
-    """Fatal error when rate limits are hit too many times - stops execution."""
+class QuotaExhaustedError(FatalError):
+    """Fatal error when API quota is exhausted (e.g., daily/monthly limit reached)."""
     pass
 
 
-def check_rate_limit(source: str) -> None:
-    """Check if we've hit too many rate limits from a source. Raises if threshold exceeded."""
-    if _rate_limit_tracker.get(source, 0) >= _RATE_LIMIT_THRESHOLD:
-        raise RateLimitExceededError(
-            f"Rate limit from {source} hit {_RATE_LIMIT_THRESHOLD} times. "
-            f"Stopping to avoid wasting API usage. Try again later or use alternative tools."
-        )
-
-
 def record_rate_limit(source: str) -> None:
-    """Record a rate limit hit from a source."""
+    """
+    Record a rate limit hit from a source for statistics.
+
+    This only logs the occurrence for debugging purposes and does not stop execution.
+    Individual retry logic (via with_retry decorator) handles transient rate limits.
+    """
     _rate_limit_tracker[source] = _rate_limit_tracker.get(source, 0) + 1
     count = _rate_limit_tracker[source]
-    logger.warning(f"Rate limit hit from {source} ({count}/{_RATE_LIMIT_THRESHOLD})")
-    if count >= _RATE_LIMIT_THRESHOLD:
-        raise RateLimitExceededError(
-            f"Rate limit from {source} hit {_RATE_LIMIT_THRESHOLD} times. "
-            f"Stopping to avoid wasting API usage."
-        )
+    logger.warning(f"Rate limit hit from {source} (total: {count} in this session)")
 
 
 def clear_rate_limits() -> None:
@@ -158,12 +149,19 @@ def clear_rate_limits() -> None:
 def with_retry(
     max_retries: int = config.TOOL_MAX_RETRIES,
     backoff_base: float = config.TOOL_RETRY_BACKOFF_BASE,
-    transient_exceptions: tuple = (httpx.TimeoutException, httpx.HTTPStatusError, TransientError)
+    transient_exceptions: tuple = (
+        httpx.TimeoutException,
+        httpx.ConnectError,      # Connection errors (DNS, refused, etc.)
+        httpx.HTTPStatusError,   # HTTP 4xx/5xx errors
+        ssl.SSLError,            # SSL/TLS errors (may not be wrapped by httpx)
+        TransientError
+    )
 ) -> Callable:
     """
     Decorator for retrying tool calls with exponential backoff.
 
     Only retries transient errors; fatal errors propagate immediately.
+    Uses whitelist approach - only known transient errors are retried.
     """
     def decorator(func: Callable[..., T]) -> Callable[..., T]:
         @wraps(func)
@@ -187,17 +185,6 @@ def with_retry(
                         raise TransientError(f"Max retries exceeded: {e}") from e
                 except FatalError:
                     raise
-                except Exception as e:
-                    # Treat unknown errors as transient by default
-                    last_error = e
-                    if attempt < max_retries:
-                        wait_time = backoff_base ** attempt
-                        logger.warning(
-                            f"{func.__name__} unexpected error: {e}. Retrying in {wait_time}s..."
-                        )
-                        time.sleep(wait_time)
-                    else:
-                        raise TransientError(f"Max retries exceeded: {e}") from e
 
             raise last_error or TransientError("Unknown error")
 
@@ -259,10 +246,6 @@ class BaseAPIClient:
             raise FatalError(f"Bad request: {response.url}")
         if response.status_code == 404:
             raise FatalError(f"Resource not found: {response.url}")
-        if response.status_code == 418:
-            # HTTP 418 "I'm a teapot" - Binance uses this for rate limiting/IP bans
-            record_rate_limit(self.SOURCE_NAME)
-            raise TransientError("Rate limit exceeded (418: IP restricted or WAF block)")
         if response.status_code == 429:
             # Track rate limits and stop if too many
             record_rate_limit(self.SOURCE_NAME)

@@ -14,7 +14,7 @@ from langchain_core.tools import tool
 
 import config
 from config import is_utxo_chain, get_asset_unit
-from src.tools.base import BaseAPIClient, with_retry, cached
+from src.tools.base import BaseAPIClient, with_retry, cached, QuotaExhaustedError
 from src.tools.models import UtxoTx, UtxoOutput, AccountTx, Vin, Vout, EthCall
 from src.tools.filters import filter_txs, filter_tx_by_address_direction
 
@@ -38,6 +38,20 @@ class BlockchairClient(BaseAPIClient):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.api_key = config.BLOCKCHAIR_API_KEY
+
+    def _handle_response(self, response):
+        """Override to handle Blockchair-specific status codes."""
+        # Handle Blockchair-specific 432 error (API quota exhausted)
+        # This is a non-standard status code used by Blockchair for daily quota limits
+        # Unlike 429 (rate limit), 432 is definitive - quota is exhausted until reset
+        if response.status_code == 432:
+            raise QuotaExhaustedError(
+                f"Blockchair API quota exhausted (432). "
+                f"Daily request limit reached. Wait for quota reset at 00:00 UTC or upgrade API plan. "
+                f"Cannot continue with Blockchair API."
+            )
+        # Delegate to parent for standard HTTP error handling
+        return super()._handle_response(response)
 
     def _build_url(self, chain: str, endpoint: str) -> str:
         """Build API URL with optional API key."""
