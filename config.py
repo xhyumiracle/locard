@@ -32,9 +32,10 @@ FALLBACK_MAX_ERRORS = 50       # Fallback workflow error 上限
 
 # ==================== Tool Retry Config ====================
 
-TOOL_MAX_RETRIES = 3           # API 调用最大重试次数（不包括首次尝试）
-TOOL_RETRY_BACKOFF_BASE = 2    # 指数退避基数（秒），第 n 次重试等待 base^n 秒
-TOOL_TIMEOUT = 30              # 单次 API 调用超时时间（秒）
+TOOL_MAX_RETRIES = 3            # API 调用最大重试次数（不包括首次尝试）
+TOOL_RETRY_BACKOFF_BASE = 2     # 指数退避基数（秒），第 n 次重试等待 base^n 秒
+TOOL_TIMEOUT = 30               # 单次 API 调用超时时间（秒）
+RETRY_AFTER_MAX_WAIT = 600      # Retry-After header 最大等待时间（秒），10分钟上限避免hang
 
 
 # ==================== Cache Config ====================
