@@ -26,7 +26,7 @@ from src.models.core import (
 )
 from src.models.finding import format_finding_data, format_findings
 from src.utils.debug import print_messages, print_structure_output
-from src.llm import create_chat_openai_with_retry
+from src.llm import create_chat_model
 from src.tools.calculators import (
     calculate_search_time_window,
     calculate_search_amount_window,
@@ -75,7 +75,7 @@ class TraceOrchestratorAgent:
     """Trace Orchestrator Agent that controls the tracing workflow."""
 
     def __init__(self):
-        base_llm = create_chat_openai_with_retry(
+        base_llm = create_chat_model(
             model=config.get_agent_model("trace_orchestrator")
         )
 

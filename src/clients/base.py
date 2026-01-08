@@ -181,6 +181,61 @@ def extract_retry_after_header(headers: Dict[str, str]) -> Optional[float]:
     return None
 
 
+def retry_with_backoff(
+    error_type: str,
+    error_str: str,
+    attempt: int,
+    max_attempts: int,
+    wait_time: Optional[float] = None,
+    backoff_base: float = 5.0,
+    max_wait: float = 120.0
+) -> None:
+    """
+    Log and sleep before retry, or raise if max attempts reached.
+
+    Used by LLM clients (OpenAI, Anthropic) for unified retry behavior.
+
+    Args:
+        error_type: Human-readable error type (e.g., "Rate limit", "Connection error")
+        error_str: Full error message
+        attempt: Current attempt number (0-indexed)
+        max_attempts: Maximum number of attempts
+        wait_time: Custom wait time (if None, use exponential backoff)
+        backoff_base: Backoff base for exponential backoff (default: 5.0 for LLM)
+        max_wait: Maximum wait time in seconds (default: 120s)
+
+    Raises:
+        Exception: Re-raises the original exception if max attempts reached
+
+    Example:
+        >>> # In LLM client invoke() method
+        >>> for attempt in range(max_attempts):
+        ...     try:
+        ...         return super().invoke(*args, **kwargs)
+        ...     except RateLimitError as e:
+        ...         retry_with_backoff("Rate limit", str(e), attempt, max_attempts)
+    """
+    if attempt >= max_attempts - 1:
+        logger.error(f"{error_type} after {max_attempts} attempts: {error_str}")
+        raise
+
+    # Use provided wait_time or calculate exponential backoff
+    if wait_time is None:
+        # No server suggestion - use exponential backoff
+        # LLM retry uses base=5 for longer waits than tool retry (base=2)
+        wait_time = calculate_backoff_time(attempt, base=backoff_base, max_wait=max_wait)
+    else:
+        # Server suggested wait time via Retry-After header (RFC 7231)
+        # Respect server's request but cap to avoid hanging indefinitely
+        wait_time = min(wait_time, config.RETRY_AFTER_MAX_WAIT)
+
+    logger.warning(
+        f"{error_type} (attempt {attempt + 1}/{max_attempts}), "
+        f"waiting {wait_time:.1f}s before retry. Error: {error_str}"
+    )
+    time.sleep(wait_time)
+
+
 class TransientError(Exception):
     """
     Retryable error (timeout, rate limit, 5xx).

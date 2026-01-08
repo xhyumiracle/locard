@@ -11,13 +11,13 @@ from langchain_core.messages import SystemMessage, HumanMessage
 import config
 from src.node.tracetx.score import ScoreTable, format_score_table
 from src.prompts import load_prompt
-from src.llm import create_chat_openai_with_retry
+from src.llm import create_chat_model
 
 class ReportAgent:
     """Report Agent that generates natural language reports from trace results."""
 
     def __init__(self):
-        self.llm = create_chat_openai_with_retry(
+        self.llm = create_chat_model(
             model=config.get_agent_model("report"),
             temperature=0.3,
             max_tokens=2048

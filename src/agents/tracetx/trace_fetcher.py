@@ -22,7 +22,7 @@ from src.tools.registry import get_trace_fetcher_tools
 from src.tools.state_tools import create_state_lookup_tool
 from src.prompts import load_prompt
 from src.utils.debug import print_messages, print_structure_output
-from src.llm import create_chat_openai_with_retry
+from src.llm import create_chat_model
 from src.utils.string import is_numeric_like
 
 
@@ -69,7 +69,7 @@ class TraceFetcherAgent:
 
     def __init__(self):
         self.base_tools = get_trace_fetcher_tools()
-        self.llm = create_chat_openai_with_retry(
+        self.llm = create_chat_model(
             model=config.get_agent_model("trace_fetcher"),
             temperature=0
         ).bind(parallel_tool_calls=False)
