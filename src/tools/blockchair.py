@@ -10,10 +10,10 @@ Pricing: Free tier 1440 req/day, paid plans available.
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
 
-from langchain_core.tools import tool
+from langchain_core.tools import tool, ToolException
 
 import config
-from config import is_utxo_chain, get_asset_unit
+from config import is_utxo_chain, is_account_chain, get_asset_unit
 from src.clients.base import BaseAPIClient, with_retry, cached, QuotaExhaustedError
 from src.tools.models import UtxoTx, UtxoOutput, AccountTx, Vin, Vout, EthCall
 from src.tools.filters import filter_txs, filter_tx_by_address_direction
@@ -182,18 +182,41 @@ class BlockchairClient(BaseAPIClient):
     @with_retry()
     def get_transaction(self, chain: str, tx_hash: str) -> Dict[str, Any]:
         """Fetch single transaction details (raw)."""
-        tx_hash = tx_hash.lower()
-        url = self._build_url(chain, f"dashboards/transaction/{tx_hash}")
+        tx_hash_lower = tx_hash.lower()
+
+        # Format tx hash: account chains (ETH) need 0x prefix, UTXO chains don't
+        if is_account_chain(chain) and not tx_hash_lower.startswith("0x"):
+            tx_hash_formatted = f"0x{tx_hash_lower}"
+        else:
+            tx_hash_formatted = tx_hash_lower
+
+        url = self._build_url(chain, f"dashboards/transaction/{tx_hash_formatted}")
         response = self.client.get(url)
         data = self._handle_response(response)
-        return data.get("data", {}).get(tx_hash, {})
+        return data.get("data", {}).get(tx_hash_formatted, {})
 
     @cached("blockchair")
     @with_retry()
     def get_transactions_batch(self, chain: str, tx_hashes: List[str]) -> Dict[str, Any]:
         """Fetch multiple transactions in one API call (max 10 per request)."""
+        if len(tx_hashes) > 10:
+            raise ToolException(
+                f"Too many tx hashes: {len(tx_hashes)} provided, but max is 10. "
+                f"Please split into multiple batches or use individual get_transaction calls."
+            )
+
         chain_name = CHAIN_MAP.get(chain.upper(), chain.lower())
-        hashes_str = ",".join(h.lower() for h in tx_hashes[:10])
+
+        # Format tx hashes: account chains (ETH) need 0x prefix, UTXO chains don't
+        formatted_hashes = []
+        for h in tx_hashes:
+            h_lower = h.lower()
+            if is_account_chain(chain) and not h_lower.startswith("0x"):
+                formatted_hashes.append(f"0x{h_lower}")
+            else:
+                formatted_hashes.append(h_lower)
+
+        hashes_str = ",".join(formatted_hashes)
         url = f"{self.BASE_URL}/{chain_name}/dashboards/transactions/{hashes_str}"
         url = self._add_key(url)
         response = self.client.get(url)
@@ -223,8 +246,14 @@ class BlockchairClient(BaseAPIClient):
         Uses batch endpoint for both single and multiple addresses.
         Returns raw API response with 'addresses' and 'transactions' keys.
         """
+        if len(addresses) > 100:
+            raise ToolException(
+                f"Too many addresses: {len(addresses)} provided, but max is 100. "
+                f"Please split into multiple batches."
+            )
+
         chain_name = CHAIN_MAP.get(chain.upper(), chain.lower())
-        addr_str = ",".join(addresses[:100])  # Max 100 addresses
+        addr_str = ",".join(addresses)
         url = f"{self.BASE_URL}/{chain_name}/dashboards/addresses/{addr_str}?limit={limit}&offset={offset}&transaction_details=true"
         url = self._add_key(url)
         response = self.client.get(url)
@@ -524,7 +553,14 @@ def get_txs_blockchair(chain: str, tx_hashes: str) -> dict:
         batch = hashes[i:i+10]
         data = client.get_transactions_batch(chain, batch)
         for tx_hash in batch:
-            tx_data = data.get(tx_hash.lower())
+            # Account chains (ETH) return keys with 0x prefix, UTXO chains don't
+            tx_hash_lower = tx_hash.lower()
+            if is_account_chain(chain) and not tx_hash_lower.startswith("0x"):
+                tx_hash_key = f"0x{tx_hash_lower}"
+            else:
+                tx_hash_key = tx_hash_lower
+
+            tx_data = data.get(tx_hash_key)
             if tx_data:
                 results.append(client.to_tx_model_json(chain, tx_data))
 
