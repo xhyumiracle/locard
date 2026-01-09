@@ -54,12 +54,12 @@ class TraceTxState(TypedDict, total=False):
 
     reflection: Dict[str, Any]
     # Self-reflection tracking for orchestrator (behavior only, not results)
-    # reflection["step_1"] = {"dst_tx_fetched": bool}
-    # reflection["step_2"] = {"tool_called": bool, "price_fetched": bool}
-    # reflection["step_3"] = {"tool_called": bool, "reused_step2_window": bool, "search_fetched": bool}
-    # reflection["step_4"] = {"tool_called": bool, "price_fetched": bool}
+    # reflection["step_1"] = {"task_issued": bool}
+    # reflection["step_2"] = {"dst_tx_received": bool, "tool_called": bool, "task_issued": bool}
+    # reflection["step_3"] = {"price_received": bool, "tool_called": bool, "reused_step2_window": bool, "task_issued": bool}
+    # reflection["step_4"] = {"search_received": bool, "tool_called": bool, "task_issued": bool}
+    # reflection["step_5"] = {"price_received": bool}
     # reflection["notes"] = [str] - free text for issues/corrections
-    # DO NOT store calculation results (window, windows) - extract from findings instead
 
     # final results
     # transfers: Annotated[Dict[str, Dict[str, Transfer]], merge_nested_dict]  # [chain][transfer_id] -> Transfer
@@ -114,10 +114,11 @@ def initialize_state(query: str) -> TraceTxState:
             "check_time_span": config.TRACETX_CHECK_TIME_SPAN,
         },
         "reflection": {
-            "step_1": {"dst_tx_fetched": False},
-            "step_2": {"tool_called": False, "price_fetched": False},
-            "step_3": {"tool_called": False, "reused_step2_window": False, "search_fetched": False},
-            "step_4": {"tool_called": False, "price_fetched": False},
+            "step_1": {"task_issued": False},
+            "step_2": {"dst_tx_received": False, "tool_called": False, "task_issued": False},
+            "step_3": {"price_received": False, "tool_called": False, "reused_step2_window": False, "task_issued": False},
+            "step_4": {"search_received": False, "tool_called": False, "task_issued": False},
+            "step_5": {"price_received": False},
             "notes": []
         },
     }

@@ -66,7 +66,7 @@ class TraceOrchestratorOutput(BaseModel):
     reflection_update: Optional[Dict[str, Dict[str, bool]]] = Field(
         default=None,
         description="""Optional: Update reflection tracking for self-verification. Only records BEHAVIOR (whether tools were called), NOT results.
-        Example: {"step_2": {"tool_called": True, "verified": True}}
+        Example: {"step_2": {"dst_tx_received": True, "tool_called": True, "task_issued": True}}
         DO NOT include calculation results (window, windows) - extract those from findings."""
     )
 
@@ -170,14 +170,20 @@ class TraceOrchestratorAgent:
         # Append inbox findings and gaps
         #################
         inbox_parts = []
-        inbox_findings  = state.get("inbox_findings")
+        inbox_findings  = state.get("inbox_findings", [])
         inbox_gaps = state.get("inbox_gaps", [])
         if inbox_findings or inbox_gaps:
-            inbox_parts.append(f"New findings ({len(inbox_findings)} total):\n")
-            inbox_parts.append(format_findings(inbox_findings))
-            inbox_parts.append("Gaps/Issues:")
-            for g in inbox_gaps:
-                inbox_parts.append(f"  - {g}")
+            # Only show findings section if there are findings
+            if inbox_findings:
+                inbox_parts.append(f"New findings ({len(inbox_findings)} total):\n")
+                inbox_parts.append(format_findings(inbox_findings))
+
+            # Show gaps section if there are gaps
+            if inbox_gaps:
+                inbox_parts.append(f"Gaps/Issues ({len(inbox_gaps)} total):\n")
+                for g in inbox_gaps:
+                    inbox_parts.append(f"  - {g}")
+
             inbox = "\n".join(inbox_parts)
             messages.append(HumanMessage(content=f"[Latest Feedback]\n{inbox}"))
 
