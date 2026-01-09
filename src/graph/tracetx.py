@@ -1,6 +1,5 @@
 import logging
 from src.node.tracetx.score import score_node
-from src.node.tracetx.derive import derive_node
 from src.node.tracetx.validate import validate_node
 from src.state.tracetx_state import TraceTxState
 from langgraph.graph import StateGraph, END
@@ -19,7 +18,6 @@ def create_graph():
     workflow.add_node("orchestrator", orchestrator_node)
     workflow.add_node("fetcher", fetcher_node)
     workflow.add_node("score", score_node)
-    workflow.add_node("derive", derive_node)
     workflow.add_node("validate", validate_node)
     # Set entry point
     workflow.set_entry_point("orchestrator")
@@ -35,8 +33,7 @@ def create_graph():
         }
     )
 
-    workflow.add_edge("fetcher", "derive")
-    workflow.add_edge("derive", "orchestrator")
+    workflow.add_edge("fetcher", "orchestrator")
     
     workflow.add_edge("validate", "score")
     workflow.add_edge("score", END)

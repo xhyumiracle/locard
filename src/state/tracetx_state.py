@@ -52,10 +52,6 @@ class TraceTxState(TypedDict, total=False):
     # check_time_span: int (seconds)
     # TODO: check_buffer_perc etc.
 
-    derived: Dict[str, Any]
-    # derived["search_window"]["time"] = {"start_ts": int, "end_ts": int}
-    # derived["search_window"]["amount"] = {"min": float, "max": float}
-
     reflection: Dict[str, Any]
     # Self-reflection tracking for orchestrator (behavior only, not results)
     # reflection["step_1"] = {"dst_tx_fetched": bool}

@@ -135,18 +135,6 @@ class TraceOrchestratorAgent:
                     param_strs.append(f"{key}={val}")
             context_parts.append(f"Params: {', '.join(param_strs)}")
 
-        # derived = state.get("derived", {})
-        # search_window = derived.get("search_window", {})
-        # if search_window:
-        #     time_w = search_window.get("time")
-        #     amount_w = search_window.get("amount")
-        #     if time_w:
-        #         context_parts.append(f"Search Window - Time: {time_w['start_ts']} to {time_w['end_ts']}")
-        #     if amount_w:
-        #         asset = amount_w.get("asset", "")
-        #         asset_label = f" {asset}" if asset else ""
-        #         context_parts.append(f"Search Window - Amount: {amount_w['min']:.8f} to {amount_w['max']:.8f}{asset_label} (calculated from dst_amount * price)")
-
         trajectories = state.get("trajectories", [])
         if trajectories:
             context_parts.append(f"Previous Actions ({len(trajectories)} total):")

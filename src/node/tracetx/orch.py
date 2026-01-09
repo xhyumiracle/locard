@@ -87,7 +87,7 @@ def orchestrator_node(state: TraceTxState) -> dict:
         "findings_ref": []
     }
 
-    # Include dst_info/src_info if provided (needed by derive_node)
+    # Include dst_info/src_info if provided (needed by validate_node)
     # Convert from Schema (Pydantic) to State model (dataclass)
     if result.dst_info:
         updates["dst_info"] = dst_info_schema_to_state(result.dst_info)
