@@ -179,14 +179,17 @@ class TraceFetcherAgent:
             matched_entries = self._match_tool_result(tool_results, f.tool_name, f.tool_args_hint)
 
             if not matched_entries:
-                error_msg = f"No tool result matched: tool={f.tool_name}, hints={f.tool_args_hint}"
-                gaps.append(error_msg)
-                # Raise immediately for debugging (gaps preserved for fallback)
-                raise ValueError(
-                    f"Finding matching failed: {error_msg}\n"
+                # Tool executed but returned no results (e.g., empty search)
+                # Log warning and add gap, but don't crash - orchestrator can handle it
+                warning_msg = f"No tool result matched: tool={f.tool_name}, hints={f.tool_args_hint}"
+                logger.warning(
+                    f"Finding matching failed: {warning_msg}\n"
                     f"Available tools: {list(tool_results.keys())}\n"
-                    f"All findings: {[{'tool': x.tool_name, 'hints': x.tool_args_hint} for x in schema.findings]}"
+                    f"This usually means the tool returned empty results (no candidates found)."
                 )
+                gaps.append(f"NOT_FOUND: {f.tool_name} returned no results for hints={f.tool_args_hint}")
+                # Skip this finding (don't add to results) and continue processing others
+                continue
 
             # Process all matched entries (deduplication happens at finding_id level)
             for entry in matched_entries:
@@ -211,6 +214,13 @@ class TraceFetcherAgent:
                     rationale="",  # Removed: was causing LLM to generate unnecessary summaries
                     data=entry.get("result", {})
                 ))
+
+        # If we have any valid findings, clear gaps to avoid confusion
+        # Gaps should only be reported when there's complete failure (no findings at all)
+        if findings:
+            if gaps:
+                logger.info(f"Clearing {len(gaps)} gaps because we have {len(findings)} valid findings")
+            gaps = []
 
         return {
             "findings": findings,

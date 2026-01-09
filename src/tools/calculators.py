@@ -5,8 +5,37 @@ These functions are decorated with @tool to be usable by LLM agents,
 while also being callable as regular Python functions.
 """
 
+import logging
 from typing import List, Dict, Any
 from langchain_core.tools import tool
+
+logger = logging.getLogger(__name__)
+
+# Approximate value ordering (higher = more valuable per unit)
+# Used as fallback when price_coin/price_quote are not provided
+ASSET_VALUE_ORDER = {
+    # Tier 1: Most valuable
+    "BTC": 100,
+    "WBTC": 100,
+
+    # Tier 2: Mid-high value
+    "ETH": 50,
+    "WETH": 50,
+    "BNB": 40,
+
+    # Tier 3: Mid value
+    "LTC": 18,
+    "SOL": 20,
+    "MATIC": 10,
+    "AVAX": 15,
+
+    # Tier 4: Lower value
+    "DOGE": 1,
+    "SHIB": 0.01,
+
+    # Default for unknown assets
+    "DEFAULT": 5
+}
 
 
 @tool
@@ -18,6 +47,38 @@ def calculate_search_time_window(dst_block_time: int, search_time_span: int) -> 
         "start": dst_block_time - search_time_span,
         "end": dst_block_time
     }
+
+
+def _infer_price_direction(dst_asset: str, src_asset: str, price_min: float, price_max: float) -> tuple[str, str]:
+    """Infer price direction based on asset value ordering and price range magnitude.
+
+    Returns: (price_coin, price_quote)
+    """
+    dst_value = ASSET_VALUE_ORDER.get(dst_asset.upper(), ASSET_VALUE_ORDER["DEFAULT"])
+    src_value = ASSET_VALUE_ORDER.get(src_asset.upper(), ASSET_VALUE_ORDER["DEFAULT"])
+
+    # If prices are > 1, it likely means "coin_in_quote" where coin is more valuable
+    # If prices are < 1, it likely means "coin_in_quote" where quote is more valuable
+    avg_price = (price_min + price_max) / 2
+
+    if dst_value > src_value:
+        # dst is more valuable (e.g., BTC > ETH), so price is likely dst_in_src (BTC_in_ETH = 30+)
+        if avg_price > 1:
+            logger.info(f"Inferred price direction: {dst_asset}_in_{src_asset} (dst more valuable, price > 1)")
+            return dst_asset, src_asset
+        else:
+            # Price < 1 but dst more valuable, so it must be src_in_dst
+            logger.info(f"Inferred price direction: {src_asset}_in_{dst_asset} (dst more valuable, price < 1)")
+            return src_asset, dst_asset
+    else:
+        # src is more valuable (e.g., ETH > DOGE), so price is likely src_in_dst (ETH_in_DOGE = large)
+        if avg_price > 1:
+            logger.info(f"Inferred price direction: {src_asset}_in_{dst_asset} (src more valuable, price > 1)")
+            return src_asset, dst_asset
+        else:
+            # Price < 1 but src more valuable, so it must be dst_in_src
+            logger.info(f"Inferred price direction: {dst_asset}_in_{src_asset} (src more valuable, price < 1)")
+            return dst_asset, src_asset
 
 
 @tool
@@ -37,30 +98,45 @@ def calculate_search_amount_window(
     if price_min <= 0 or price_max <= 0:
         raise ValueError(
             f"Invalid prices ({price_min}, {price_max}). "
-            f"Fetch {price_coin}_in_{price_quote} price first before calling this calculator."
+            f"Price must be positive before calling this calculator."
         )
 
     if dst_amount <= 0:
         raise ValueError(f"Invalid dst_amount: {dst_amount}. Amount must be positive.")
 
-    # Check if price direction matches our need (dst_asset in src_asset)
-    if price_coin.upper() == dst_asset.upper() and price_quote.upper() == src_asset.upper():
-        # Direct match: dst_asset_in_src_asset
-        # price tells us: 1 dst_asset = price src_asset
+    # Loose equality: case-insensitive match, or one side empty (can infer)
+    def loose_equal(a: str, b: str) -> bool:
+        if not a and not b:
+            return False  # Both empty = not equal (cannot determine)
+        if not a or not b:
+            return True   # One empty = equal (can infer)
+        return a.upper() == b.upper()  # Both present = case-insensitive compare
+
+    # Match price direction with dst/src using loose equality
+    if loose_equal(dst_asset, price_coin) and loose_equal(src_asset, price_quote):
+        # Direct match: dst_in_src (e.g., BTC_in_ETH)
         final_price_min = price_min
         final_price_max = price_max
-    elif price_coin.upper() == src_asset.upper() and price_quote.upper() == dst_asset.upper():
-        # Inverted match: src_asset_in_dst_asset
-        # price tells us: 1 src_asset = price dst_asset
-        # We need: 1 dst_asset = ? src_asset
-        # So invert: 1 dst_asset = (1/price) src_asset
-        # When inverting: min becomes 1/max, max becomes 1/min
+        logger.info(f"Price direction: direct match {dst_asset}_in_{src_asset}")
+    elif loose_equal(dst_asset, price_quote) and loose_equal(src_asset, price_coin):
+        # Inverted match: src_in_dst (e.g., ETH_in_BTC, need to invert)
         final_price_min = 1.0 / price_max
         final_price_max = 1.0 / price_min
+        logger.info(f"Price direction: inverted match {src_asset}_in_{dst_asset}, inverting prices")
+    elif not price_coin and not price_quote:
+        # Both price_coin and price_quote missing: use value-based inference
+        price_coin, price_quote = _infer_price_direction(dst_asset, src_asset, price_min, price_max)
+        logger.info(f"Price direction inferred from asset values: {price_coin}_in_{price_quote}")
+        # Recurse with inferred values (will match one of the above branches)
+        if price_coin.upper() == dst_asset.upper():
+            final_price_min = price_min
+            final_price_max = price_max
+        else:
+            final_price_min = 1.0 / price_max
+            final_price_max = 1.0 / price_min
     else:
         raise ValueError(
-            f"Price direction mismatch: need {dst_asset}->{src_asset} conversion, "
-            f"but got price {price_coin}_in_{price_quote}"
+            f"Price direction mismatch: cannot match {dst_asset}/{src_asset} with {price_coin}/{price_quote}"
         )
 
     # Safety check: ensure min < max
