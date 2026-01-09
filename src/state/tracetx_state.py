@@ -55,9 +55,9 @@ class TraceTxState(TypedDict, total=False):
     reflection: Dict[str, Any]
     # Self-reflection tracking for orchestrator (behavior only, not results)
     # reflection["step_1"] = {"dst_tx_fetched": bool}
-    # reflection["step_2"] = {"tool_called": bool, "verified": bool}
-    # reflection["step_3"] = {"tool_called": bool, "reused_step2_window": bool, "verified": bool}
-    # reflection["step_4"] = {"tool_called": bool, "verified": bool}
+    # reflection["step_2"] = {"tool_called": bool, "price_fetched": bool}
+    # reflection["step_3"] = {"tool_called": bool, "reused_step2_window": bool, "search_fetched": bool}
+    # reflection["step_4"] = {"tool_called": bool, "price_fetched": bool}
     # reflection["notes"] = [str] - free text for issues/corrections
     # DO NOT store calculation results (window, windows) - extract from findings instead
 
@@ -115,9 +115,9 @@ def initialize_state(query: str) -> TraceTxState:
         },
         "reflection": {
             "step_1": {"dst_tx_fetched": False},
-            "step_2": {"tool_called": False, "verified": False},
-            "step_3": {"tool_called": False, "reused_step2_window": False, "verified": False},
-            "step_4": {"tool_called": False, "verified": False},
+            "step_2": {"tool_called": False, "price_fetched": False},
+            "step_3": {"tool_called": False, "reused_step2_window": False, "search_fetched": False},
+            "step_4": {"tool_called": False, "price_fetched": False},
             "notes": []
         },
     }

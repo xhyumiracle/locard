@@ -30,7 +30,7 @@ Default workflow when tracing funds from a **dst_chain** tx back to **source_cha
 - **Use tool** to compute backward Search Time Window from dst_block_time
 - Issue task to fetch `DESTINATION_in_SOURCE` price (coin=DESTINATION, quote=SOURCE) for the time window
   - Include buffer parameter: `search_price_buffer` from params (e.g., 0.05 = ±5% tolerance)
-- **Reflection**: Track via `reflection_update = {"step_2": {"tool_called": True, "verified": True}}`
+- **Reflection**: Track via `reflection_update = {"step_2": {"tool_called": True, "price_fetched": True}}`
 
 ### Step 3: Search for Source Tx Candidates
 - **Prerequisite**: Must have price finding from Step 2
@@ -40,14 +40,14 @@ Default workflow when tracing funds from a **dst_chain** tx back to **source_cha
 - **Important**: Reuse the same Search Time Window in Step 2 for transaction search
 - ONLY issue search task after tool returns the amount window
 - UTXO chains: recommend search "outputs" only for efficiency
-- **Reflection**: Track via `reflection_update = {"step_3": {"tool_called": True, "reused_step2_window": True}}`
+- **Reflection**: Track via `reflection_update = {"step_3": {"tool_called": True, "reused_step2_window": True, "search_fetched": True}}`
 
 ### Step 4: Get Price Range for All Candidates
 - **Use tool** to calculate Check Time Windows for ALL candidate block_times  (**symmetric** windows, i.e. [T - check_time_span, T + check_time_span])
   - Extract unique block_times from [Latest Feedback] search_txs finding
   - Tool returns symmetric time windows for each candidate
 - Use the windows output from tool in your batch price fetch task brief
-- **Reflection**: Track via `reflection_update = {"step_4": {"tool_called": True}}`
+- **Reflection**: Track via `reflection_update = {"step_4": {"tool_called": True, "price_fetched": True}}`
 
 ### Step 5: Output Finding IDs for Validation & Scoring
 - **ONLY when you have received price fetch results** from Step 4, set `action="done"`
