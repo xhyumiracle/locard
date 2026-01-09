@@ -104,14 +104,18 @@ def state_ids_hint(state: TraceTxState) -> str:
     unique_ids = list(dict.fromkeys(ids))
     return ", ".join(unique_ids)
 
-def initialize_state(query: str) -> TraceTxState:
+def initialize_state(query: str, params: Optional[Dict[str, Any]] = None) -> TraceTxState:
+    # Use provided params or fall back to config defaults
+    if params is None:
+        params = {}
+
     return {
         "query": query,
         "iteration": 0,
         "params": {
-            "search_time_span": config.TRACETX_SEARCH_TIME_SPAN,
-            "search_price_buffer": config.TRACETX_SEARCH_PRICE_BUFFER,
-            "check_time_span": config.TRACETX_CHECK_TIME_SPAN,
+            "search_time_span": params.get("search_time_span", config.TRACETX_SEARCH_TIME_SPAN),
+            "search_price_buffer": params.get("search_price_buffer", config.TRACETX_SEARCH_PRICE_BUFFER),
+            "check_time_span": params.get("check_time_span", config.TRACETX_CHECK_TIME_SPAN),
         },
         "reflection": {
             "step_1": {"task_issued": False},
