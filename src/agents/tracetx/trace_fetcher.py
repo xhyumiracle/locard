@@ -122,9 +122,32 @@ class TraceFetcherAgent:
 
         print_messages("trace_fetcher", "Input", input_messages)
 
-        result = agent.invoke({
-            "messages": input_messages
-        })
+        try:
+            result = agent.invoke({
+                "messages": input_messages
+            })
+
+        except Exception as e:
+            # Catch unrecoverable errors from agent execution (e.g., tool validation errors)
+            # These are errors that the react agent cannot handle by itself
+            # Convert to gap and return to orchestrator for decision
+            error_msg = str(e)
+            logger.error(f"Fetcher agent failed with unrecoverable error: {error_msg}", exc_info=True)
+
+            # Categorize error for orchestrator
+            gap_type = "TOOL_FAILED"
+            gap_details = error_msg
+            if "rate limit" in error_msg.lower() or "429" in error_msg:
+                gap_type = "RATE_LIMITED"
+                gap_details = "Please try again later"
+
+            gap = f"{gap_type}: {gap_details}"
+            logger.warning(f"Returning gap to orchestrator: {gap}")
+
+            return {
+                "findings": [],
+                "gaps": [gap]
+            }
 
         # Log
         messages = result.get("messages", input_messages)
