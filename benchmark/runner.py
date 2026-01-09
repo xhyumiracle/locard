@@ -394,6 +394,20 @@ class BenchmarkRunner:
         completed_count = 0
         failed_count = 0
 
+        # Create run record at the start and add to runs list
+        # This will be updated in real-time as cases complete
+        run_record = {
+            "timestamp": mode_start_iso,
+            "yaml_file": str(yaml_path),
+            "offset": offset,
+            "limit": limit,
+            "duplicated_cases": len(duplicated_bench_ids),
+            "new_cases": len(new_bench_ids),
+            "processed_cases": 0,  # Will be updated after each case
+            "execution_seconds": 0.0  # Will be updated after each case
+        }
+        self.run_info["runs"].append(run_record)
+
         # Get graph
         graph = SUBGRAPH_MAP["tracetx"]
 
@@ -503,28 +517,25 @@ class BenchmarkRunner:
                 root_logger.removeHandler(case_handler)
                 case_handler.close()
 
+                # Update run record with current progress
+                run_record["processed_cases"] = processed_count
+                run_record["execution_seconds"] = time.time() - mode_start
+                self.run_info["execution_time"] = sum(r["execution_seconds"] for r in self.run_info["runs"])
+
+                # Save run_info after each case for real-time progress tracking
+                self.save_run_info()
+
         mode_time = time.time() - mode_start
 
         # Update total_cases by scanning actual results
         self.update_total_cases()
 
-        # Record this run
-        run_record = {
-            "timestamp": mode_start_iso,
-            "yaml_file": str(yaml_path),  # Store user-provided path (relative, not absolute)
-            "offset": offset,
-            "limit": limit,
-            "duplicated_cases": len(duplicated_bench_ids),
-            "new_cases": len(new_bench_ids),
-            "processed_cases": processed_count,
-            "execution_seconds": mode_time
-        }
-        self.run_info["runs"].append(run_record)
-
-        # Update cumulative execution time
+        # Final update to run record with accurate totals
+        run_record["processed_cases"] = processed_count
+        run_record["execution_seconds"] = mode_time
         self.run_info["execution_time"] = sum(r["execution_seconds"] for r in self.run_info["runs"])
 
-        # Save run_info after candidate mode
+        # Save run_info one last time with final stats
         self.save_run_info()
 
         if self.verbose:
