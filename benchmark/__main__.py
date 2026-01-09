@@ -183,8 +183,8 @@ Examples:
             print(f"Error: --continue requires existing work directory: {work_dir}")
             print(f"The directory does not exist. Please check the path.")
             sys.exit(1)
-    elif work_dir.exists() and "candidate" in modes:
-        # Directory exists without --continue in candidate mode
+    elif work_dir.exists() and "candidate" in modes and not args.force:
+        # Directory exists without --continue or --force in candidate mode
         if any(work_dir.iterdir()):
             results_dir = work_dir / "results"
             has_results = results_dir.exists() and any(results_dir.iterdir())
