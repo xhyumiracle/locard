@@ -270,9 +270,11 @@ class BlockchairClient(BaseAPIClient):
         direction: str,
         min_amount: float,
         max_amount: float,
-        limit: int = 100
+        limit: int = 100,
+        recipient: str = None,
+        sender: str = None
     ) -> List[Dict[str, Any]]:
-        """Search transactions by time and amount range."""
+        """Search transactions by time, amount range, and optional address filters."""
         chain_name = CHAIN_MAP.get(chain.upper(), chain.lower())
         unit = get_asset_unit(chain)
 
@@ -295,6 +297,12 @@ class BlockchairClient(BaseAPIClient):
 
         query_parts = [f"time({min_time_str}..{max_time_str})"]
 
+        # Add address filters if specified
+        if recipient:
+            query_parts.append(f"recipient({recipient.lower()})")
+        if sender:
+            query_parts.append(f"sender({sender.lower()})")
+
         # Add amount filter if specified
         # IMPORTANT: Blockchair API uses different units for query parameters:
         # - UTXO chains (BTC/DOGE/LTC): use satoshi (1e8) for output_total/input_total
@@ -312,13 +320,34 @@ class BlockchairClient(BaseAPIClient):
                 else:
                     query_parts.append(f"{amount_field}({min_amount}..)")
 
+        # Filter out failed transactions in the query for non-UTXO chains (ETH, etc)
+        if not is_utxo_chain(chain):
+            query_parts.append("failed(false)")
+
         query = f"q={','.join(query_parts)}&limit={limit}&s=time(desc)"
         url = f"{self.BASE_URL}/{chain_name}/transactions?{query}"
         url = self._add_key(url)
 
         response = self.client.get(url)
         data = self._handle_response(response)
-        return data.get("data", [])
+        transactions = data.get("data", [])
+
+        # Clean up response: only keep necessary fields
+        # For trace_ancestors_eth, we only need: hash, sender, recipient, value, time
+        cleaned = []
+        for tx in transactions:
+            # Skip failed transactions if not already filtered
+            if tx.get("failed", False):
+                continue
+            cleaned.append({
+                "hash": tx.get("hash"),
+                "sender": tx.get("sender"),
+                "recipient": tx.get("recipient"),
+                "value": tx.get("value"),
+                "time": tx.get("time")
+            })
+
+        return cleaned
 
     @cached("blockchair")
     @with_retry()
@@ -837,7 +866,11 @@ def get_addresses_txs_blockchair(
     # Parse and validate addresses
     addr_list = [a.strip() for a in addresses.split(",") if a.strip()]
     if not addr_list:
-        raise ValueError("No valid addresses provided")
+        raise ValueError(
+            "No valid addresses provided. This tool requires specific addresses. "
+            "To search by time/amount without knowing addresses, "
+            "use other tools to search txs or outputs or eth calls instead."
+        )
     if len(addr_list) > 100:
         raise ValueError("Max 100 addresses per request")
 
@@ -986,3 +1019,196 @@ def get_address_blockchair(chain: str, address: str) -> dict:
         "first_seen": addr_info.get("first_seen_receiving"),
         "last_seen": addr_info.get("last_seen_receiving"),
     }
+
+
+@tool
+def trace_ancestors_eth(
+    start_txs: str,
+    max_hops: int = 3,
+    only_larger_ancestor: bool = False,
+    max_ancestor_per_hop: int = 0,
+    min_value: float = None
+) -> dict:
+    """
+    Trace ETH transaction ancestors (incoming native ETH transfers). ETH only. Paid API.
+
+    Uses BFS to trace back incoming transfers layer by layer. For each transaction,
+    finds all transactions that sent ETH to its sender address before its timestamp.
+
+    Args:
+        start_txs: Comma-separated transaction hashes to trace from
+        max_hops: Maximum number of hops to trace back (1-10, required)
+        only_larger_ancestor: If true, only keep ancestors with value > current tx value
+        max_ancestor_per_hop: If >0, only trace top N ancestors per hop by value (default 0 = no limit)
+        min_value: If specified, only keep ancestors with value > min_value ETH (default None = no filter)
+
+    Returns:
+        {
+            "src_tx_hash": {
+                "ancestor_tx_hash": {
+                    "sender": "0x...",
+                    "recipient": "0x...",
+                    "value": 100.5,
+                    "timestamp": 1234567890,
+                    "hop": 1
+                }
+            }
+        }
+
+    Example:
+        trace_ancestors_eth(
+            start_txs="0xe4fe2b9a5829034c7793668ace3f68e4f925fdcbd1691f8100fab9dd2887a3b0",
+            max_hops=2,
+            only_larger_ancestor=True,
+            max_ancestor_per_hop=5
+        )
+    """
+    from collections import deque
+
+    if not config.BLOCKCHAIR_API_KEY:
+        raise ValueError("Blockchair API key required. Set BLOCKCHAIR_API_KEY.")
+
+    if max_hops <= 0 or max_hops > 10:
+        raise ValueError(f"max_hops must be between 1 and 10, got {max_hops}")
+
+    # Parse start transactions
+    start_tx_list = [tx.strip() for tx in start_txs.split(",") if tx.strip()]
+    if not start_tx_list:
+        raise ValueError("No valid transaction hashes provided")
+
+    for tx in start_tx_list:
+        if not _is_valid_tx_hash(tx):
+            raise ValueError(f"Invalid tx hash format: '{tx}'")
+
+    client = BlockchairClient()
+
+    # Initialize result structures
+    results = {tx: {} for tx in start_tx_list}
+    visited = {tx: set() for tx in start_tx_list}
+
+    # BFS queue: (src_tx, hop, anchor_value, anchor_timestamp, trace_address)
+    queue = deque()
+
+    # Fetch start transaction info and initialize queue
+    for src_tx in start_tx_list:
+        tx_data = client.get_transaction("ETH", src_tx)
+        if not tx_data:
+            raise ValueError(f"Transaction not found: {src_tx}")
+
+        tx_info = tx_data.get("transaction", {})
+
+        # Mark the start tx as visited to avoid finding it as its own ancestor
+        visited[src_tx].add(src_tx.lower())
+
+        queue.append((
+            src_tx,
+            0,
+            int(tx_info.get("value", 0)) / get_asset_unit("ETH"),
+            client._parse_time(tx_info.get("time")),
+            tx_info.get("sender", "").lower()
+        ))
+
+    # BFS traversal
+    while queue:
+        src_tx, hop, anchor_value, anchor_ts, trace_address = queue.popleft()
+
+        if hop >= max_hops:
+            continue
+
+        if not trace_address or not anchor_ts:
+            continue
+
+        # Search for incoming transactions TO trace_address before anchor timestamp
+        ancestors_raw = client.search_transactions(
+            chain="ETH",
+            min_timestamp=0,
+            max_timestamp=anchor_ts,
+            direction="both",
+            min_amount=0,
+            max_amount=0,
+            limit=100,
+            recipient=trace_address
+        )
+
+        # Filter: Convert value from wei to ETH for each transaction
+        # Exclude transactions already in the visited set for this src_tx
+        # Note: failed transactions already filtered by search_transactions
+        eth_unit = get_asset_unit("ETH")
+        ancestors = []
+        for tx in ancestors_raw:
+            tx_hash = tx.get("hash", "") or ""
+            if not tx_hash:
+                continue
+
+            tx_hash_lower = tx_hash.lower()
+
+            # Skip if this is a transaction we've already processed for this src_tx
+            if tx_hash_lower in visited[src_tx]:
+                continue
+
+            # Convert value from wei to ETH
+            value_eth = int(tx.get("value", 0)) / eth_unit
+
+            # Apply min_value filter
+            if min_value is not None and value_eth <= min_value:
+                continue
+
+            ancestors.append({
+                'hash': tx_hash,
+                'sender': tx.get('sender', '').lower(),
+                'recipient': tx.get('recipient', '').lower(),
+                'value': value_eth,
+                'time': tx.get('time'),
+            })
+
+        # Apply only_larger_ancestor filter
+        if only_larger_ancestor and hop > 0:
+            ancestors = [a for a in ancestors if a["value"] > anchor_value]
+
+        # Sort by value descending
+        ancestors.sort(key=lambda x: x["value"], reverse=True)
+
+        # Limit ancestors per hop
+        if max_ancestor_per_hop > 0:
+            ancestors = ancestors[:max_ancestor_per_hop]
+
+        # Process each ancestor
+        for anc in ancestors:
+            anc_hash = anc.get("hash", "")
+            if not anc_hash:
+                continue
+
+            anc_hash_lower = anc_hash.lower()
+
+            # Cross-layer deduplication: skip if already traced for this src_tx
+            if anc_hash_lower in visited[src_tx]:
+                continue
+
+            visited[src_tx].add(anc_hash_lower)
+
+            # Value is already converted to ETH above
+            anc_value = anc["value"]
+            anc_sender = anc.get("sender", "").lower()
+            anc_recipient = anc.get("recipient", "").lower()
+            anc_ts = client._parse_time(anc.get("time"))
+
+            # Store ancestor info
+            results[src_tx][anc_hash_lower] = {
+                "sender": anc_sender,
+                "recipient": anc_recipient,
+                "value": anc_value,
+                "timestamp": anc_ts,
+                "hop": hop + 1
+            }
+
+            # Add to queue for further tracing (trace sender's incoming txs)
+            if anc_sender and anc_ts:
+                queue.append((
+                    src_tx,
+                    hop + 1,
+                    anc_value,
+                    anc_ts,
+                    anc_sender  # Next layer: trace incoming to this sender
+                ))
+
+    return results
