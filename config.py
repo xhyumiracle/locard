@@ -122,6 +122,15 @@ def get_tracetx_search_time_window(anchor_time: int, time_span: int) -> tuple[in
 def get_tracetx_check_time_window(anchor_time: int, time_span: int) -> tuple[int, int]:
     return ensure_ts_seconds(anchor_time) - time_span, ensure_ts_seconds(anchor_time) + time_span
 
+# ==================== TraceGroupTx State Initialization Config ====================
+
+# Default parameters for initializing TraceGroupTxState
+TRACEGROUPTX_MAX_HOPS = 1           # 最大祖先追踪跳数
+TRACEGROUPTX_MIN_VALUE = 1.0        # 最小祖先价值（ETH）
+TRACEGROUPTX_ONLY_LARGER_ANCESTOR = False  # 是否只追踪更大金额的祖先
+TRACEGROUPTX_MAX_ANCESTOR_PER_HOP = 10      # 每跳最大祖先数（0=无限制）
+TRACEGROUPTX_MAX_SRC_PER_DST = 5           # 每个dst_tx最多取多少个src candidates（0=无限制）
+
 # ==================== API Keys (from environment variables) ====================
 
 # Blockchain Data APIs
@@ -139,6 +148,8 @@ LLM_MAX_TOKENS = 8192  # 最大输出 token 数
 AGENT_MODELS = {
     "trace_orchestrator": os.getenv("AGENT_MODEL_ORCHESTRATOR") or None,
     "trace_fetcher": os.getenv("AGENT_MODEL_FETCHER") or None,
+    "trace_group_orchestrator": os.getenv("AGENT_MODEL_GROUP_ORCHESTRATOR") or None,
+    "samechain_tracer": os.getenv("AGENT_MODEL_SAMECHAIN_TRACER") or None,
     "router": os.getenv("AGENT_MODEL_ROUTER") or LLM_MODEL_LITE,  # Default to lite
     "report": os.getenv("AGENT_MODEL_REPORT") or LLM_MODEL_LITE,  # Default to lite
 }

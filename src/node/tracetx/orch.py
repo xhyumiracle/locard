@@ -1,6 +1,6 @@
 import logging
 import config
-from src.agents.tracetx.trace_orchestrator import TraceOrchestratorAgent
+from src.agents.tracetx.orchestrator import TraceOrchestratorAgent
 from src.state.tracetx_state import TraceTxState
 from src.models.core import dst_info_schema_to_state, src_info_schema_to_state
 

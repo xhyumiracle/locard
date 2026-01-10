@@ -1,5 +1,5 @@
 import config
-from src.agents.tracetx.trace_fetcher import TraceFetcherAgent
+from src.agents.tracetx.fetcher import TraceFetcherAgent
 from src.state.tracetx_state import TraceTxState
 import src.tools.converters as converter
 from src.tools.models import AccountTx, UtxoTx

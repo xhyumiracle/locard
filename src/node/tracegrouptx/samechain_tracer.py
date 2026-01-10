@@ -12,7 +12,7 @@ LLM agent node (for potential future extensions with more tools).
 
 from typing import Dict, Any
 from src.state.tracegrouptx_state import TraceGroupTxState
-from src.agents.tracegrouptx.samechain_tracer_agent import SameChainTracerAgent
+from src.agents.tracegrouptx.samechain_tracer import SameChainTracerAgent
 
 
 def samechain_tracer_node(state: TraceGroupTxState) -> Dict[str, Any]:

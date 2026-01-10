@@ -4,7 +4,7 @@
 import logging
 from typing import Dict, Any
 from src.state.tracegrouptx_state import TraceGroupTxState
-from src.agents.tracegrouptx.trace_group_orchestrator import TraceGroupOrchestratorAgent
+from src.agents.tracegrouptx.orchestrator import TraceGroupOrchestratorAgent
 from src.models.core import SrcInfo
 import config
 
