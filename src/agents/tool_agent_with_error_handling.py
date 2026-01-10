@@ -6,7 +6,7 @@ and converts them to error messages, allowing the LLM to see the error and proce
 """
 
 import logging
-from typing import List
+from typing import List, Callable, Dict, Any, Optional
 from langchain_core.language_models import BaseChatModel
 from langchain_core.tools import BaseTool
 from langchain_core.messages import ToolMessage
@@ -19,6 +19,25 @@ logger = logging.getLogger(__name__)
 
 class ToolAgentWithErrorHandling(ToolAgent):
     """Tool Agent that catches tool exceptions and converts them to error messages."""
+
+    def __init__(
+        self,
+        llm: BaseChatModel,
+        tools: List[BaseTool],
+        output_schema: type[BaseModel],
+        tool_args_preprocessor: Optional[Callable[[str, Dict[str, Any]], Dict[str, Any]]] = None
+    ):
+        """Initialize tool agent with optional args preprocessor.
+
+        Args:
+            llm: Base language model
+            tools: List of @tool decorated functions
+            output_schema: Pydantic model for structured output
+            tool_args_preprocessor: Optional callback to preprocess tool args before execution.
+                Signature: (tool_name, tool_args) -> tool_args
+        """
+        super().__init__(llm, tools, output_schema)
+        self.tool_args_preprocessor = tool_args_preprocessor
 
     def invoke(self, messages: List) -> BaseModel:
         """Invoke agent with messages, return structured output.
@@ -39,6 +58,11 @@ class ToolAgentWithErrorHandling(ToolAgent):
             for tc in response.tool_calls:
                 tool_name = tc['name']
                 tool_args = tc['args']
+
+                # Preprocess args if callback provided
+                if self.tool_args_preprocessor:
+                    tool_args = self.tool_args_preprocessor(tool_name, tool_args)
+
                 logger.debug(f"Executing tool: {tool_name} with args: {tool_args}")
 
                 # Find and execute the tool
@@ -73,7 +97,8 @@ class ToolAgentWithErrorHandling(ToolAgent):
 def create_tool_agent_with_error_handling(
     llm: BaseChatModel,
     tools: List[BaseTool],
-    output_schema: type[BaseModel]
+    output_schema: type[BaseModel],
+    tool_args_preprocessor: Optional[Callable[[str, Dict[str, Any]], Dict[str, Any]]] = None
 ) -> ToolAgentWithErrorHandling:
     """Create a tool agent with error handling.
 
@@ -83,8 +108,9 @@ def create_tool_agent_with_error_handling(
         llm: Base language model
         tools: List of @tool decorated functions
         output_schema: Pydantic model for structured output
+        tool_args_preprocessor: Optional callback to preprocess tool args before execution
 
     Returns:
         ToolAgentWithErrorHandling instance
     """
-    return ToolAgentWithErrorHandling(llm, tools, output_schema)
+    return ToolAgentWithErrorHandling(llm, tools, output_schema, tool_args_preprocessor)

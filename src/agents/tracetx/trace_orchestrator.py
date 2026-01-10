@@ -92,8 +92,25 @@ class TraceOrchestratorAgent:
         self.agent = create_tool_agent_with_error_handling(
             llm=base_llm,
             tools=calculator_tools,
-            output_schema=TraceOrchestratorOutput
+            output_schema=TraceOrchestratorOutput,
+            tool_args_preprocessor=self._preprocess_tool_args
         )
+
+    def _preprocess_tool_args(self, tool_name: str, tool_args: dict) -> dict:
+        """Preprocess tool arguments to fill in missing values from state.
+
+        For calculate_search_amount_window: fill missing price_coin/price_quote with empty strings
+        to trigger automatic price direction inference.
+        """
+        if tool_name == 'calculate_search_amount_window':
+            # Ensure price_coin and price_quote exist (even if empty) to avoid validation errors
+            # Empty strings will trigger the automatic price direction inference logic
+            if 'price_coin' not in tool_args:
+                tool_args['price_coin'] = ''
+            if 'price_quote' not in tool_args:
+                tool_args['price_quote'] = ''
+
+        return tool_args
 
     def process(
         self,
@@ -129,6 +146,10 @@ class TraceOrchestratorAgent:
             # Format time-related params with explicit "seconds" suffix for clarity
             param_strs = []
             for key, val in params.items():
+                # Skip None values - don't show unused optional parameters
+                if val is None:
+                    continue
+
                 if 'time_span' in key or 'time' in key:
                     param_strs.append(f"{key}={val} (seconds)")
                 else:
