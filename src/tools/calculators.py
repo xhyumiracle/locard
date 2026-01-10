@@ -39,13 +39,20 @@ ASSET_VALUE_ORDER = {
 
 
 @tool
-def calculate_search_time_window(dst_block_time: int, search_time_span: int) -> Dict[str, int]:
-    """Calculate backward search time window: [dst_block_time - search_time_span, dst_block_time].
+def calculate_search_time_window(
+    dst_block_time: int,
+    search_time_span: int,
+    search_time_offset: int = None
+) -> Dict[str, int]:
+    """Calculate backward search time window: [dst_block_time - search_time_span, dst_block_time - search_time_offset].
 
-    Use in Step 2 for price fetch window."""
+    Use in Step 2 for price fetch window. Leave search_time_offset empty unless explicitly specified in params."""
+
+    end_time = dst_block_time if search_time_offset is None else dst_block_time - search_time_offset
+
     return {
-        "start": dst_block_time - search_time_span,
-        "end": dst_block_time
+        "start": end_time - search_time_span,
+        "end": end_time
     }
 
 

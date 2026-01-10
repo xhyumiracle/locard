@@ -114,6 +114,7 @@ def initialize_state(query: str, params: Optional[Dict[str, Any]] = None) -> Tra
         "iteration": 0,
         "params": {
             "search_time_span": params.get("search_time_span", config.TRACETX_SEARCH_TIME_SPAN),
+            "search_time_offset": params.get("search_time_offset", None),
             "search_price_buffer": params.get("search_price_buffer", config.TRACETX_SEARCH_PRICE_BUFFER),
             "check_time_span": params.get("check_time_span", config.TRACETX_CHECK_TIME_SPAN),
         },
