@@ -132,7 +132,7 @@ class TraceOrchestratorAgent:
         state: TraceTxState,
     ) -> List:
         """Build message list for LLM."""
-        messages = [SystemMessage(content=load_prompt("trace_orchestrator"))]
+        messages = [SystemMessage(content=load_prompt("tracetx/trace_orchestrator"))]
 
         messages.append(SystemMessage(content=state["query"]))
 

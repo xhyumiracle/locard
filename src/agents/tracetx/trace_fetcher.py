@@ -73,7 +73,7 @@ class TraceFetcherAgent:
             model=config.get_agent_model("trace_fetcher"),
             temperature=0
         ).bind(parallel_tool_calls=False)
-        self.prompt = load_prompt("trace_fetcher")
+        self.prompt = load_prompt("tracetx/trace_fetcher")
 
     def fetch(self, task_brief: str, state: Optional[TraceTxState] = None) -> dict:
         """
