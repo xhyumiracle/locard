@@ -459,7 +459,11 @@ def get_addresses_txs_doge_electrs(
     """
     addr_list = [a.strip() for a in addresses.split(",") if a.strip()]
     if not addr_list:
-        raise ValueError("No valid addresses provided")
+        raise ValueError(
+            "No valid addresses provided. This tool requires specific addresses. "
+            "To search by time/amount without knowing addresses, "
+            "use other tools to search txs or outputs instead."
+        )
 
     for addr in addr_list:
         if not _is_valid_address(addr):
