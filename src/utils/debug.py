@@ -24,9 +24,12 @@ def _load_system_prompts():
     if not PROMPTS_DIR.exists():
         return
 
-    for prompt_file in PROMPTS_DIR.glob("*.md"):
+    # Recursively scan all .md files in prompts directory
+    for prompt_file in PROMPTS_DIR.rglob("*.md"):
         try:
-            name = prompt_file.stem
+            # Get relative path from PROMPTS_DIR (e.g., "tracetx/trace_orchestrator")
+            rel_path = prompt_file.relative_to(PROMPTS_DIR)
+            name = str(rel_path.with_suffix(""))  # Remove .md extension
             content = load_prompt(name)  # Use loader to benefit from lru_cache
             _SYSTEM_PROMPTS[content] = name
         except Exception:

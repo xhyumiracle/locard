@@ -9,7 +9,7 @@ Implements the workflow described in systemdesign.md:
 """
 
 import logging
-from typing import Literal
+from typing import Literal, Optional, Dict, Any
 
 from langgraph.graph import StateGraph, END
 from langchain_core.messages import AIMessage
@@ -17,8 +17,8 @@ from langchain_core.messages import AIMessage
 from src.agents.report_agent import ReportAgent
 from src.state.graph_state import GraphState, create_initial_state
 from src.agents.router import RouterAgent
-from src.graph.registry import SUBGRAPH_MAP
-from src.state.tracetx_state import initialize_state
+from src.graph.registry import SUBGRAPH_MAP, STATE_INIT_MAP
+from src.utils.debug import print_messages
 
 logger = logging.getLogger(__name__)
 
@@ -48,9 +48,11 @@ def dispatch_node(state: GraphState) -> dict:
     logger.info("Dispatch begin")
 
     user_input = state["messages"][0].content
+    params = state.get("params")
 
-    state = initialize_state(user_input)
-    out_substate = SUBGRAPH_MAP[key].invoke(state)
+    # Initialize state using the appropriate function
+    subgraph_state = STATE_INIT_MAP[key](user_input, params=params)
+    out_substate = SUBGRAPH_MAP[key].invoke(subgraph_state)
     logger.info("Dispatch done")
 
     return {"result": out_substate["result"]}
@@ -64,8 +66,13 @@ def reporter_node(state: GraphState) -> dict:
     report = ReportAgent().generate_report(result, user_input)
     logger.info("Reporter done")
 
+    # Print report output
+    print_messages("reporter", "Agent Begin")
+    report_message = AIMessage(content=report)
+    print_messages("reporter", "Agent End")
+
     return {
-        "messages": [AIMessage(content=report)]
+        "messages": [report_message]
     }
 
 # ==================== Graph Construction ====================
@@ -89,18 +96,19 @@ def create_graph() -> StateGraph:
 
     return workflow.compile()
 
-def run_graph(user_input: str, thread_id: str = None) -> dict:
+def run_graph(user_input: str, thread_id: str = None, params: Optional[Dict[str, Any]] = None) -> dict:
     """
     Run the graph with user input.
 
     Args:
         user_input: User's message
         thread_id: Optional thread ID for session tracking
+        params: Optional parameters to override defaults
 
     Returns:
         Final state after graph execution
     """
-    initial_state = create_initial_state(user_input, thread_id)
+    initial_state = create_initial_state(user_input, thread_id, params=params)
 
     logger.info(f"Starting graph execution for: {user_input[:100]}...")
 

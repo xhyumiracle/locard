@@ -9,7 +9,6 @@ from typing import Any, Dict
 from langchain_core.messages import SystemMessage, HumanMessage
 
 import config
-from src.node.tracetx.score import ScoreTable, format_score_table
 from src.prompts import load_prompt
 from src.llm import create_chat_model
 
@@ -33,7 +32,7 @@ class ReportAgent:
 
         Args:
             result: The result dict from subgraph, structure:
-                    - success case: {"success": True, "data": <score_table>}
+                    - success case: {"success": True, "data": <...>, "formatted_data": <str>}
                     - failure case: {"success": False, "reason": <str>}
             user_query: Original user query for context
 
@@ -45,25 +44,25 @@ class ReportAgent:
             reason = result.get("reason", "Unknown error")
             return f"Trace failed: {reason}"
 
-        # Success case - format scoring table
-        score_table = result["data"]
-        messages = self._build_messages(score_table, user_query)
+        # Success case - use formatted_data provided by subgraph
+        formatted_data = result.get("formatted_data")
+        if not formatted_data:
+            return "Error: No formatted_data in result"
+
+        messages = self._build_messages(formatted_data, user_query)
         response = self.llm.invoke(messages)
         return response.content
 
     def _build_messages(
         self,
-        score_table: ScoreTable,
+        formatted_data: str,
         user_query: str
     ):
         """Build messages for LLM."""
         messages = [SystemMessage(content=load_prompt("report_agent"))]
 
-        # Format scoring table as structured input
-        table_str = format_score_table(score_table)
-
         content = f"User Query: {user_query}\n\n" if user_query else ""
-        content += f"Scoring Results:\n{table_str}"
+        content += f"Trace Results:\n{formatted_data}"
 
         messages.append(HumanMessage(content=content))
         return messages

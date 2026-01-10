@@ -68,13 +68,15 @@ def score_node(state: TraceTxState) -> dict:
 
     score_table = score_candidates(links=cclinks)
 
-    logger.info(f"Score table: {format_score_table(score_table)}")
+    formatted_data = format_score_table(score_table)
+    logger.debug(f"TraceTx score table:\n{formatted_data}")
 
     return {
         "score_table": score_table,  # Add to state top-level for easy access
         "result": {
             "success": True,
-            "data": score_table  # Keep for compatibility
+            "data": score_table,  # Keep for compatibility
+            "formatted_data": formatted_data  # Add formatted string for ReportAgent
         }
      }
 

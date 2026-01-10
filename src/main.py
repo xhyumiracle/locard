@@ -12,7 +12,7 @@ import sys
 import logging
 import argparse
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict, Any, List
 
 import yaml
 
@@ -38,17 +38,18 @@ def get_final_response(state: dict) -> str:
     return "No response generated."
 
 
-def run_single_query(query: str) -> str:
+def run_single_query(query: str, params: Optional[Dict[str, Any]] = None) -> str:
     """
     Run a single query through the system.
 
     Args:
         query: User query string
+        params: Optional parameters to override defaults
 
     Returns:
         Response string
     """
-    state = run_graph(query)
+    state = run_graph(query, params=params)
     return get_final_response(state)
 
 
@@ -112,6 +113,61 @@ Tips:
 """)
 
 
+def parse_params(param_list: Optional[List[str]]) -> Dict[str, Any]:
+    """
+    Parse --param arguments into dict.
+
+    Simple prefix convention:
+    - "max_hops=1" → {"max_hops": 1}
+    - "tracetx.search_time_offset=50" → {"tracetx_params": {"search_time_offset": 50}}
+
+    Args:
+        param_list: List of "key=value" strings from --param arguments
+
+    Returns:
+        Dict with parsed parameters (tracetx.* becomes nested under tracetx_params)
+    """
+    if not param_list:
+        return {}
+
+    params = {}
+    tracetx_params = {}
+
+    for param_str in param_list:
+        if "=" not in param_str:
+            print(f"Warning: Invalid param format '{param_str}', expected KEY=VALUE")
+            continue
+
+        key, value_str = param_str.split("=", 1)
+
+        # Auto-convert value type
+        try:
+            value = int(value_str)
+        except ValueError:
+            try:
+                value = float(value_str)
+            except ValueError:
+                if value_str.lower() in ("true", "false"):
+                    value = value_str.lower() == "true"
+                else:
+                    value = value_str
+
+        # Route to correct dict based on prefix
+        if key.startswith("tracetx."):
+            # tracetx.search_time_offset → tracetx_params["search_time_offset"]
+            actual_key = key[8:]  # Remove "tracetx." prefix
+            tracetx_params[actual_key] = value
+        else:
+            # Direct parameter
+            params[key] = value
+
+    # Add tracetx_params if any
+    if tracetx_params:
+        params["tracetx_params"] = tracetx_params
+
+    return params
+
+
 def run_example():
     """Run the example from docs/example_data.md."""
     print("\n" + "=" * 60)
@@ -135,12 +191,15 @@ def run_example():
     return 0
 
 
-def run_batch(batch_file: str) -> int:
+def run_batch(batch_file: str, limit: Optional[int] = None, offset: int = 0, params: Optional[Dict[str, Any]] = None) -> int:
     """
     Run multiple queries from a YAML batch file.
 
     Args:
         batch_file: Path to YAML file containing queries
+        limit: Maximum number of queries to run (None = all)
+        offset: Skip first N queries (default: 0)
+        params: Global params from CLI --param (applied to all queries)
 
     Returns:
         Exit code (0 for success, non-zero for errors)
@@ -157,18 +216,29 @@ def run_batch(batch_file: str) -> int:
         print(f"Error parsing YAML file: {e}")
         return 1
 
-    queries = data.get("queries", [])
+    queries = data
     if not queries:
         print("No queries found in batch file.")
         return 0
 
+    # Apply offset and limit
+    total_queries = len(queries)
+    if offset >= total_queries:
+        print(f"Error: Offset {offset} exceeds total queries {total_queries}")
+        return 1
+
+    queries = queries[offset:]
+    if limit is not None:
+        queries = queries[:limit]
+
     print("\n" + "=" * 60)
     print(f"Running Batch: {batch_path.name}")
-    print(f"Total queries: {len(queries)}")
+    print(f"Total queries in file: {total_queries}")
+    print(f"Running queries: {offset + 1}-{offset + len(queries)}")
     print("=" * 60)
 
     errors = 0
-    for i, item in enumerate(queries, 1):
+    for i, item in enumerate(queries, offset + 1):
         query = item.get("query", "").strip()
         groundtruth = item.get("groundtruth", "")
         # Backward compatibility: fallback to 'comment' if 'groundtruth' not present
@@ -178,14 +248,17 @@ def run_batch(batch_file: str) -> int:
         if not query:
             continue
 
-        print(f"\n[{i}/{len(queries)}] Query:")
+        print(f"\n[{i}/{offset + len(queries)}] Query:")
         print("-" * 60)
         print(query)
         print("-" * 60)
+        if params:
+            print(f"Params: {params}")
+            print("-" * 60)
         print("Processing...\n")
 
         try:
-            response = run_single_query(query)
+            response = run_single_query(query, params=params)
             print("\nResponse:")
             print("-" * 60)
             print(response)
@@ -228,10 +301,29 @@ def main():
         help="Run queries from a YAML batch file"
     )
     parser.add_argument(
+        "--limit",
+        type=int,
+        metavar="N",
+        help="Maximum number of queries to run from batch file (default: all)"
+    )
+    parser.add_argument(
+        "--offset",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Skip first N queries in batch file (default: 0)"
+    )
+    parser.add_argument(
         "-v", "--verbose",
         action="count",
         default=0,
         help="Increase verbosity: -v (INFO), -vv (DEBUG business code), -vvv (full DEBUG)"
+    )
+    parser.add_argument(
+        "--param",
+        action="append",
+        metavar="KEY=VALUE",
+        help="Set parameter (use tracetx. prefix for TraceTx params, e.g., --param max_hops=1 --param tracetx.search_time_offset=50)"
     )
 
     args = parser.parse_args()
@@ -249,12 +341,15 @@ def main():
     )
     config.setup_logging()  # Apply namespace-specific levels for level 2
 
+    # Parse params if provided
+    params = parse_params(args.param) if args.param else None
+
     if args.example:
         sys.exit(run_example())
     elif args.batch:
-        sys.exit(run_batch(args.batch))
+        sys.exit(run_batch(args.batch, limit=args.limit, offset=args.offset, params=params))
     elif args.query:
-        response = run_single_query(args.query)
+        response = run_single_query(args.query, params=params)
         print(response)
     else:
         run_interactive()
