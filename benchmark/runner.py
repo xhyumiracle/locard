@@ -80,7 +80,8 @@ class BenchmarkRunner:
         modes: List[BenchmarkMode] = None,
         verbose: bool = True,
         force: bool = False,
-        continue_mode: bool = False
+        continue_mode: bool = False,
+        graph_params: dict = None
     ):
         """
         Initialize benchmark runner.
@@ -91,6 +92,7 @@ class BenchmarkRunner:
             verbose: Print progress to console
             force: Force overwrite for score/evaluate modes (candidate never overwrites)
             continue_mode: Continue mode - append to existing work directory
+            graph_params: Optional dict of graph execution parameters (currently used by tracetx)
 
         Raises:
             ValueError: If candidate mode and output_dir is not empty
@@ -100,6 +102,7 @@ class BenchmarkRunner:
         self.verbose = verbose
         self.force = force
         self.continue_mode = continue_mode
+        self.graph_params = graph_params  # Can be None or dict with user overrides
 
         # Create output directory if it doesn't exist
         # Note: Directory validation is done in __main__.py before log file creation
@@ -406,6 +409,9 @@ class BenchmarkRunner:
             "processed_cases": 0,  # Will be updated after each case
             "execution_seconds": 0.0  # Will be updated after each case
         }
+        # Only include graph_params if user provided any overrides
+        if self.graph_params:
+            run_record["graph_params"] = self.graph_params
         self.run_info["runs"].append(run_record)
 
         # Get graph
@@ -448,8 +454,8 @@ class BenchmarkRunner:
             start_time = time.time()
 
             try:
-                # Initialize state
-                state = initialize_state(query=query)
+                # Initialize state with optional tracetx params
+                state = initialize_state(query=query, params=self.graph_params)
 
                 # Run graph to END (goes through validate -> score)
                 # Graph execution will automatically use the current log level
@@ -975,7 +981,8 @@ def run_benchmark(
     offset: int = 0,
     verbose: bool = True,
     force: bool = False,
-    continue_mode: bool = False
+    continue_mode: bool = False,
+    graph_params: dict = None
 ):
     """
     Convenience function to run benchmark.
@@ -989,13 +996,15 @@ def run_benchmark(
         verbose: Print progress to console
         force: Force overwrite existing results (only for score/evaluate, candidate never overwrites)
         continue_mode: Continue mode - append to existing work directory
+        graph_params: Optional dict of graph execution parameters (e.g., for tracetx: search_time_span, search_price_buffer, check_time_span)
     """
     runner = BenchmarkRunner(
         output_dir=Path(output_dir),
         modes=modes,
         verbose=verbose,
         force=force,
-        continue_mode=continue_mode
+        continue_mode=continue_mode,
+        graph_params=graph_params
     )
 
     runner.run_batch(yaml_path=Path(yaml_path) if yaml_path else None, limit=limit, offset=offset)

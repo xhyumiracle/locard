@@ -65,6 +65,10 @@ Examples:
   # Run all three modes (default: candidate -> score -> evaluate)
   python -m benchmark --yaml data/queries.yaml --work-dir results/exp1
 
+  # Run with custom parameters (unified with main.py --param syntax)
+  python -m benchmark --yaml data/queries.yaml --work-dir results/exp1 \\
+    --param max_hops=2 --param tracetx.search_time_offset=120
+
   # Run only first query (offset=0, limit=1)
   python -m benchmark --yaml data/queries.yaml --work-dir results/exp1 --limit 1
 
@@ -146,6 +150,14 @@ Examples:
         help="Continue mode - append to existing work directory (allows incremental runs)"
     )
 
+    # Graph execution parameters (unified with main.py)
+    parser.add_argument(
+        "--param",
+        action="append",
+        metavar="KEY=VALUE",
+        help="Set parameter (use tracetx. prefix for TraceTx params, e.g., --param max_hops=1 --param tracetx.search_time_offset=50)"
+    )
+
     args = parser.parse_args()
 
     # Override VERBOSE_LEVEL from command line args (highest priority)
@@ -194,6 +206,10 @@ Examples:
                 print(f"   To overwrite existing cases, use: --continue --force")
                 sys.exit(0)
 
+    # Parse params using unified parse_params from main.py
+    from src.main import parse_params
+    graph_params = parse_params(args.param) if args.param else None
+
     # Setup log file redirection BEFORE basicConfig (if candidate mode)
     # This ensures logging output is captured to file
     from benchmark.runner import TeeOutput
@@ -235,7 +251,8 @@ Examples:
             offset=args.offset,
             verbose=not args.quiet,
             force=args.force,
-            continue_mode=args.continue_mode
+            continue_mode=args.continue_mode,
+            graph_params=graph_params if graph_params else None
         )
         sys.exit(0)
     except Exception as e:
