@@ -1,5 +1,5 @@
 """
-LLM service layer for BlockchainMAS.
+LLM service layer.
 
 Provides LLM clients with retry logic and provider-specific implementations.
 Supports multiple providers with automatic selection based on model name.

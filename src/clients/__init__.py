@@ -1,5 +1,5 @@
 """
-API client infrastructure for BlockchainMAS.
+API client infrastructure.
 
 Provides base classes, retry/cache decorators, and error handling for HTTP API clients.
 """

@@ -1,4 +1,4 @@
-"""Core data models for BlockchainMAS"""
+"""Core data models"""
 
 from src.models.core import (
     TxStatus,

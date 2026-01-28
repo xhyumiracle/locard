@@ -1,3 +1,3 @@
-"""BlockchainMAS - Blockchain Forensics Multi Agent System"""
+"""Agentic Blockchain Forensics"""
 
 __version__ = "0.1.0"

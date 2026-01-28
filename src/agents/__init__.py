@@ -1,4 +1,4 @@
-"""Agents for BlockchainMAS"""
+"""Agent implementations"""
 
 from src.agents.router import RouterAgent, RouterOutput
 from src.agents.tracetx.orchestrator import TraceOrchestratorAgent, TraceOrchestratorOutput

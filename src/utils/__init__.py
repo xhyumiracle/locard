@@ -1,4 +1,4 @@
-"""Utility modules for BlockchainMAS."""
+"""Utility modules."""
 
 from src.utils.debug import print_messages, print_structure_output
 

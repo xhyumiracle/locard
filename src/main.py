@@ -1,5 +1,5 @@
 """
-BlockchainMAS - Main entry point.
+Main entry point.
 
 Usage:
     python -m src.main                    # Interactive mode
@@ -56,7 +56,7 @@ def run_single_query(query: str, params: Optional[Dict[str, Any]] = None) -> str
 def run_interactive():
     """Run interactive CLI mode."""
     print("\n" + "=" * 60)
-    print("BlockchainMAS - Blockchain Forensics Multi-Agent System")
+    print("Blockchain Forensics Multi-Agent System")
     print("=" * 60)
     print("\nType your query to trace transactions across blockchains.")
     print("Commands: 'quit' or 'exit' to exit, 'help' for info\n")
@@ -93,8 +93,8 @@ def run_interactive():
 def print_help():
     """Print help information."""
     print("""
-BlockchainMAS Help
-==================
+Help
+====
 
 This system can trace transactions across multiple blockchains including
 Bitcoin (BTC), Dogecoin (DOGE), and Ethereum (ETH).
@@ -282,7 +282,7 @@ def run_batch(batch_file: str, limit: Optional[int] = None, offset: int = 0, par
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(
-        description="BlockchainMAS - Blockchain Forensics Multi-Agent System"
+        description="Blockchain Forensics Multi-Agent System"
     )
     parser.add_argument(
         "query",

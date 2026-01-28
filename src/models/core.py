@@ -1,5 +1,5 @@
 """
-Core data structures for BlockchainMAS.
+Core data structures for blockchain transaction representation.
 
 Based on Rosetta protocol abstractions for cross-chain transaction representation.
 """

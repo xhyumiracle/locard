@@ -1,5 +1,5 @@
 """
-System-wide configuration for BlockchainMAS v0
+System-wide configuration
 
 This file contains all magic numbers, thresholds, and environment-based settings.
 For v0, config is static (requires restart to change). For v1+, consider adding

@@ -1,4 +1,4 @@
-"""LangGraph workflow for BlockchainMAS"""
+"""LangGraph workflow"""
 
 from src.graph.workflow import create_graph, run_graph
 

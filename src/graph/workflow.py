@@ -1,5 +1,5 @@
 """
-LangGraph workflow definition for BlockchainMAS.
+LangGraph workflow definition.
 
 Implements the workflow described in systemdesign.md:
 - Router -> routes to trace, fallback, or chat

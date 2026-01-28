@@ -1,4 +1,4 @@
-"""Blockchain data tools for BlockchainMAS
+"""Blockchain data tools
 
 Naming convention: {action}_{resource}[_{chain}]_{source}
 - action: get, search

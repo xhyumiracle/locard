@@ -1,4 +1,4 @@
-"""State schemas for BlockchainMAS LangGraph"""
+"""State schemas for LangGraph workflow"""
 
 from src.state.graph_state import (
     Subgraph,

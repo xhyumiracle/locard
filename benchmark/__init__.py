@@ -1,5 +1,5 @@
 """
-Benchmark module for evaluating BlockchainMAS performance.
+Benchmark module for evaluating system performance.
 
 This module provides tools for:
 - Batch evaluation of queries from YAML files

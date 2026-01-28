@@ -1,5 +1,5 @@
 """
-Tool registry for BlockchainMAS agents.
+Tool registry for agents.
 
 Provides organized access to tools by category.
 """

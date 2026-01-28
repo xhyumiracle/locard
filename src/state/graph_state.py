@@ -1,5 +1,5 @@
 """
-GraphState schema for BlockchainMAS LangGraph workflow.
+GraphState schema for LangGraph workflow.
 """
 
 from typing import List, Literal, Optional, Annotated, Dict, Any

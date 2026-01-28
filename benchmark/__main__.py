@@ -58,7 +58,7 @@ def _get_unique_log_path(work_dir: Path, base_filename: str) -> Path:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="BlockchainMAS Benchmark Runner",
+        description="Benchmark Runner",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:

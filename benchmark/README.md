@@ -1,6 +1,6 @@
 # Benchmark System
 
-Batch evaluation system for BlockchainMAS with three-stage pipeline and incremental runs.
+Batch evaluation system with three-stage pipeline and incremental runs.
 
 ## Quick Start
 

@@ -1,5 +1,5 @@
 """
-Debug utilities for BlockchainMAS.
+Debug utilities for agent logging.
 
 Provides verbose logging for agent input/output to help with debugging.
 
