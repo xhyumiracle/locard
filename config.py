@@ -135,6 +135,8 @@ TRACEGROUPTX_MAX_SRC_PER_DST = 5           # 每个dst_tx最多取多少个src c
 
 # Blockchain Data APIs
 BLOCKCHAIR_API_KEY = os.getenv("BLOCKCHAIR_API_KEY", "")
+ALCHEMY_API_KEY = os.getenv("ALCHEMY_API_KEY", "")
+BITQUERY_API_KEY = os.getenv("BITQUERY_API_KEY", "")
 
 # ==================== LLM Config ====================
 

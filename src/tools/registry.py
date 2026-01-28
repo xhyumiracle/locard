@@ -25,6 +25,9 @@ from src.tools.blockchair import (
 from src.tools.threexpl import (
     search_eth_transfers_3xpl,
 )
+from src.tools.bitquery import (
+    search_eth_transfers_bitquery,
+)
 from src.tools.binance import get_price_binance
 
 
@@ -47,7 +50,8 @@ def get_trace_tools() -> List[BaseTool]:
         # search_txs_blockchair,     # Multi-chain (paid) - filters by tx total (less precise)
         search_utxo_outputs_blockchair,  # RECOMMENDED - Multi-chain (paid) - filters by individual output amount
         # search_eth_calls_blockchair,     # ETH only (paid) - requires address filter
-        search_eth_transfers_3xpl,         # RECOMMENDED - ETH only (MVP free) - no address required, OLAP queries
+        # search_eth_transfers_3xpl,         # ETH only (MVP free) - OLAP queries, but has performance issues
+        search_eth_transfers_bitquery,       # RECOMMENDED - ETH only (paid) - GraphQL, supports time+amount filtering
 
         # Price for cross-chain amount matching
         get_price_binance,
