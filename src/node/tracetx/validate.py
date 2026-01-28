@@ -83,7 +83,7 @@ def candidates_to_cclinks(candidate_txs: List[dict], dst_info: DstInfo, all_find
         candidate_transfer = converter.dict_to_transfer(candidate)
 
         # Candidate must have exactly one vout operation (recipient/output)
-        # Multiple operations are OK (e.g., AccountTx/EthCall have both vin+vout),
+        # Multiple operations are OK (e.g., EthTransfer/EthCall have both vin+vout),
         # but we need exactly one vout to match as the source output
         vout_ops = {k: v for k, v in candidate_transfer.operations.items() if k.startswith("vout:")}
         if len(vout_ops) != 1:

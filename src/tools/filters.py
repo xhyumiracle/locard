@@ -1,7 +1,7 @@
 """
 Common filter utilities for blockchain transaction data.
 
-These filters operate on standardized tx dicts (UtxoTx/AccountTx model_dump format).
+These filters operate on standardized tx dicts (UtxoTx/EthTransfer model_dump format).
 Used by various API tool implementations for consistent filtering logic.
 """
 
@@ -48,7 +48,7 @@ def filter_tx_by_amount(
     For Account chains: checks the transaction amount field.
 
     Args:
-        tx: Transaction dict (UtxoTx or AccountTx format)
+        tx: Transaction dict (UtxoTx or EthTransfer format)
         direction: "in" (vout/recipient), "out" (vin/sender), "both"
         min_amount: Minimum amount, 0 = no lower bound
         max_amount: Maximum amount, 0 = no upper bound (equal to min = exact match)

@@ -15,7 +15,7 @@ from langchain_core.tools import tool, ToolException
 import config
 from config import is_utxo_chain, is_account_chain, get_asset_unit
 from src.clients.base import BaseAPIClient, with_retry, cached, QuotaExhaustedError
-from src.tools.models import UtxoTx, UtxoOutput, AccountTx, Vin, Vout, EthCall
+from src.tools.models import UtxoTx, UtxoOutput, EthTransfer, Vin, Vout, EthCall
 from src.tools.filters import filter_txs, filter_tx_by_address_direction
 
 
@@ -86,7 +86,7 @@ class BlockchairClient(BaseAPIClient):
         return None
 
     def to_tx_model_json(self, chain: str, data: Dict[str, Any]) -> dict:
-        """Convert Blockchair tx data to UtxoTx/AccountTx model dict.
+        """Convert Blockchair tx data to UtxoTx/EthTransfer model dict.
 
         Handles both dashboard response (with transaction/inputs/outputs)
         and list response (flat tx dict with hash field).
@@ -158,7 +158,7 @@ class BlockchairClient(BaseAPIClient):
             else:
                 status = "pending"
 
-            return AccountTx(
+            return EthTransfer(
                 chain=chain,
                 txid=tx_hash,
                 status=status,
@@ -561,7 +561,7 @@ def get_txs_blockchair(chain: str, tx_hashes: str) -> dict:
         tx_hashes: Comma-separated transaction hashes
 
     Returns:
-        txs[]: List of UtxoTx or AccountTx with full details
+        txs[]: List of UtxoTx or EthTransfer with full details
     """
     chain = _validate_chain(chain)
 
@@ -623,7 +623,7 @@ def search_txs_blockchair(
         limit: Max results (default 100)
 
     Returns:
-        txs[]: List of UtxoTx or AccountTx matching criteria
+        txs[]: List of UtxoTx or EthTransfer matching criteria
     """
     chain = _validate_chain(chain)
     direction = _validate_direction_for_search(chain, direction, min_amount, max_amount)

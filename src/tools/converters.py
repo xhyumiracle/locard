@@ -8,7 +8,7 @@ import time
 from typing import Dict
 
 from config import get_asset_decimals
-from src.tools.models import UtxoTx, UtxoOutput, AccountTx, EthCall, Eth3xplTransfer
+from src.tools.models import UtxoTx, UtxoOutput, EthTransfer, EthCall, Eth3xplTransfer
 from src.models.core import (
     Transfer, Operation, AccountIdentifier, TxStatus
 )
@@ -106,8 +106,8 @@ def utxo_output_to_transfer(output: UtxoOutput, source: str = "unknown") -> Tran
         type="utxo"
     )
 
-def account_tx_to_transfer(tx: AccountTx, source: str = "unknown") -> Transfer:
-    """Convert AccountTx to Transfer model.
+def account_tx_to_transfer(tx: EthTransfer, source: str = "unknown") -> Transfer:
+    """Convert EthTransfer to Transfer model.
 
     Args:
         tx: Account transaction data
@@ -268,9 +268,9 @@ def dict_to_transfer(data: dict) -> Transfer:
         transfer = Eth3xplTransfer(**data)
         return eth_3xpl_transfer_to_transfer(transfer)
 
-    # Check if it's AccountTx (has 'sender' or 'recipient')
+    # Check if it's EthTransfer (has 'sender' or 'recipient')
     if "sender" in data or "recipient" in data:
-        tx = AccountTx(**data)
+        tx = EthTransfer(**data)
         return account_tx_to_transfer(tx)
 
     raise ValueError(f"Invalid data type: {type(data)}")

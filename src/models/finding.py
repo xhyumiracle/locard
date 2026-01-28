@@ -216,7 +216,7 @@ def format_finding_data(data) -> str:
     """Format finding data into compact string for LLM context.
 
     Handles:
-    - Transaction data (UtxoTx, UtxoOutput, AccountTx) → converts to Transfer format
+    - Transaction data (UtxoTx, UtxoOutput, EthTransfer) → converts to Transfer format
     - Price data (price_min/max)
     - List data (search results)
     - Other scalar fields

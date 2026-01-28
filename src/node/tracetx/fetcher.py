@@ -2,7 +2,7 @@ import config
 from src.agents.tracetx.fetcher import TraceFetcherAgent
 from src.state.tracetx_state import TraceTxState
 import src.tools.converters as converter
-from src.tools.models import AccountTx, UtxoTx
+from src.tools.models import EthTransfer, UtxoTx
 import logging
 
 logger = logging.getLogger(__name__)
@@ -51,7 +51,7 @@ def fetcher_node(state: TraceTxState) -> dict:
     #             utxo_tx = UtxoTx(**data)
     #             transfer = converter.utxo_tx_to_transfer(utxo_tx)
     #         else:
-    #             account_tx = AccountTx(**data)
+    #             account_tx = EthTransfer(**data)
     #             transfer = converter.account_tx_to_transfer(account_tx)
 
     #         if chain not in transfers_update:

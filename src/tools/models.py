@@ -67,7 +67,7 @@ class UtxoOutput(BaseModel):
 
 # ==================== Account Transaction ====================
 
-class AccountTx(BaseModel):
+class EthTransfer(BaseModel):
     """Account chain transaction (ETH, etc.)."""
     chain: str
     txid: str
@@ -77,7 +77,7 @@ class AccountTx(BaseModel):
     sender: Optional[str] = None
     recipient: Optional[str] = None
     amount: float = 0
-    fee: float = 0
+    fee: Optional[float] = None
     meta: Dict[str, Any] = {}  # gas_used, gas_price, etc.
 
 
@@ -122,4 +122,4 @@ class PriceRange(BaseModel):
     via: Optional[str]
 
 
-ToolTx = Union[UtxoTx, AccountTx, UtxoOutput, EthCall, Eth3xplTransfer]
+ToolTx = Union[UtxoTx, EthTransfer, UtxoOutput, EthCall, Eth3xplTransfer]
