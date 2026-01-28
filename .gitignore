@@ -6,16 +6,20 @@ dist/
 wheels/
 *.egg-info
 
-# Virtual environments
 .venv
+.env
+.DS_Store
+.claude
 
 # API cache
 .cache/
-archived/
-.env
-.DS_Store
+
+# Local files
+.archived/
+.local/
+.important
+tests/
+data/analysis
 *.ndjson
 *.json
 *.log
-.claude
-.important
