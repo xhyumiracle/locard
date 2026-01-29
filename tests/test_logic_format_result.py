@@ -455,5 +455,3 @@ def test_format_result_node():
     print("✓ Test passed! format_result_node works correctly.")
     print("=" * 80)
 
-    return formatted_output
-

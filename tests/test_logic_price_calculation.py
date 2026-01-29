@@ -15,14 +15,15 @@ def test_btc_to_eth_inference():
     Price: BTC_in_ETH = 33-37 (BTC more valuable, price > 1)
     Should correctly infer and convert 0.27586129 BTC to ETH.
     """
-    result = calculate_search_amount_window(
-        dst_amount=0.27586129,
-        dst_asset="BTC",
-        src_asset="ETH",
-        price_min=33.6640680369,
-        price_max=37.459864431,
-        # price_coin and price_quote are intentionally omitted
-    )
+    result = calculate_search_amount_window.invoke({
+        "dst_amount": 0.27586129,
+        "dst_asset": "BTC",
+        "src_asset": "ETH",
+        "price_min": 33.6640680369,
+        "price_max": 37.459864431,
+        "price_coin": "",  # Empty string triggers inference
+        "price_quote": ""
+    })
 
     print("Test 1: BTC->ETH (price missing)")
     print(f"  Input: 0.27586129 BTC, price [33.66, 37.46]")
@@ -41,13 +42,15 @@ def test_eth_to_doge_inference():
     Price: ETH_in_DOGE = large number (ETH more valuable, price > 1)
     Should correctly infer and convert ETH to DOGE.
     """
-    result = calculate_search_amount_window(
-        dst_amount=10.0,
-        dst_asset="ETH",
-        src_asset="DOGE",
-        price_min=10000.0,
-        price_max=12000.0,
-    )
+    result = calculate_search_amount_window.invoke({
+        "dst_amount": 10.0,
+        "dst_asset": "ETH",
+        "src_asset": "DOGE",
+        "price_min": 10000.0,
+        "price_max": 12000.0,
+        "price_coin": "",  # Empty string triggers inference
+        "price_quote": ""
+    })
 
     print("Test 2: ETH->DOGE (price missing)")
     print(f"  Input: 10.0 ETH, price [10000, 12000]")
@@ -66,13 +69,15 @@ def test_doge_to_btc_inference():
     Price: BTC_in_DOGE = large number (BTC more valuable, price > 1)
     Should correctly infer and convert DOGE to BTC.
     """
-    result = calculate_search_amount_window(
-        dst_amount=100000.0,
-        dst_asset="DOGE",
-        src_asset="BTC",
-        price_min=1000000.0,
-        price_max=1200000.0,
-    )
+    result = calculate_search_amount_window.invoke({
+        "dst_amount": 100000.0,
+        "dst_asset": "DOGE",
+        "src_asset": "BTC",
+        "price_min": 1000000.0,
+        "price_max": 1200000.0,
+        "price_coin": "",  # Empty string triggers inference
+        "price_quote": ""
+    })
 
     print("Test 3: DOGE->BTC (price missing)")
     print(f"  Input: 100000.0 DOGE, price [1000000, 1200000]")
@@ -87,15 +92,15 @@ def test_doge_to_btc_inference():
 
 def test_with_explicit_price_direction():
     """Test that explicit price_coin/price_quote still work correctly."""
-    result = calculate_search_amount_window(
-        dst_amount=0.27586129,
-        dst_asset="BTC",
-        src_asset="ETH",
-        price_min=33.6640680369,
-        price_max=37.459864431,
-        price_coin="BTC",
-        price_quote="ETH"
-    )
+    result = calculate_search_amount_window.invoke({
+        "dst_amount": 0.27586129,
+        "dst_asset": "BTC",
+        "src_asset": "ETH",
+        "price_min": 33.6640680369,
+        "price_max": 37.459864431,
+        "price_coin": "BTC",
+        "price_quote": "ETH"
+    })
 
     print("Test 4: Explicit price direction (should not infer)")
     print(f"  Input: 0.27586129 BTC, price [33.66, 37.46], explicit BTC_in_ETH")

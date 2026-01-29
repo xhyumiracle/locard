@@ -18,7 +18,6 @@ wheels/
 .archived/
 .local/
 .important
-tests/
 data/analysis
 *.ndjson
 *.json
