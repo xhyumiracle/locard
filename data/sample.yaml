@@ -1,0 +1,4 @@
+queries:
+- query: What is the source transaction for this cross-chain DOGE output to DFtveSGy9MkgqKc2uvJnhy3bP9gyMaNTEQ in tx 75412AD04820CA91A9212C7E5F1842B0EB434A2592731C4891135FFCA6A32BA8
+    on DOGE, given that it originates from BTC on BTC?
+  groundtruth: 8F299E3F9738B9971E2CCFA68E1F8FFE6B16696EFB0B2F6C7720EF6285EC5AD3
