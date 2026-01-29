@@ -216,7 +216,8 @@ def run_batch(batch_file: str, limit: Optional[int] = None, offset: int = 0, par
         print(f"Error parsing YAML file: {e}")
         return 1
 
-    queries = data
+    # Extract queries list from YAML (same format as benchmark module)
+    queries = data.get("queries", [])
     if not queries:
         print("No queries found in batch file.")
         return 0
