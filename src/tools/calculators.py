@@ -120,7 +120,19 @@ def calculate_search_amount_window(
         return a.upper() == b.upper()  # Both present = case-insensitive compare
 
     # Match price direction with dst/src using loose equality
-    if loose_equal(dst_asset, price_coin) and loose_equal(src_asset, price_quote):
+    # Check inference first (priority fix: empty strings should trigger inference, not loose matching)
+    if not price_coin and not price_quote:
+        # Both price_coin and price_quote missing: use value-based inference
+        price_coin, price_quote = _infer_price_direction(dst_asset, src_asset, price_min, price_max)
+        logger.info(f"Price direction inferred from asset values: {price_coin}_in_{price_quote}")
+        # Apply inferred direction
+        if price_coin.upper() == dst_asset.upper():
+            final_price_min = price_min
+            final_price_max = price_max
+        else:
+            final_price_min = 1.0 / price_max
+            final_price_max = 1.0 / price_min
+    elif loose_equal(dst_asset, price_coin) and loose_equal(src_asset, price_quote):
         # Direct match: dst_in_src (e.g., BTC_in_ETH)
         final_price_min = price_min
         final_price_max = price_max
@@ -130,17 +142,6 @@ def calculate_search_amount_window(
         final_price_min = 1.0 / price_max
         final_price_max = 1.0 / price_min
         logger.info(f"Price direction: inverted match {src_asset}_in_{dst_asset}, inverting prices")
-    elif not price_coin and not price_quote:
-        # Both price_coin and price_quote missing: use value-based inference
-        price_coin, price_quote = _infer_price_direction(dst_asset, src_asset, price_min, price_max)
-        logger.info(f"Price direction inferred from asset values: {price_coin}_in_{price_quote}")
-        # Recurse with inferred values (will match one of the above branches)
-        if price_coin.upper() == dst_asset.upper():
-            final_price_min = price_min
-            final_price_max = price_max
-        else:
-            final_price_min = 1.0 / price_max
-            final_price_max = 1.0 / price_min
     else:
         raise ValueError(
             f"Price direction mismatch: cannot match {dst_asset}/{src_asset} with {price_coin}/{price_quote}"
