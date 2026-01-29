@@ -1,7 +1,7 @@
 [project]
-name = "blockchainmas"
+name = "locard"
 version = "0.1.0"
-description = "Blockchain Forensics Multi Agent System - Cross-chain transaction tracing"
+description = "The first agentic blockchain forensics framework"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -19,7 +19,7 @@ dependencies = [
 ]
 
 [project.scripts]
-blockchainmas = "src.main:main"
+locard = "src.main:main"
 
 [build-system]
 requires = ["hatchling"]
