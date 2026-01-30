@@ -24,6 +24,22 @@ uv sync  # or: pip install -e .
 
 **Setup**: Copy `.env.example` to `.env` and configure API keys (OpenAI/Anthropic/tools).
 
+## Architecture
+
+Locard's workflow orchestrates multiple specialized agents and subgraphs to handle cross-chain transaction tracing:
+
+<div align="center">
+  <img src="docs/architecture/workflow.svg" alt="Locard Architecture" width="100%">
+</div>
+
+**Key components:**
+- **Router**: Routes queries to appropriate subgraphs (TraceTx or TraceGroupTx)
+- **TraceTx (TT)**: Single-transaction cross-chain trace with iterative orchestration
+- **TraceGroupTx (TG)**: Group-transaction trace that invokes TraceTx multiple times
+- **Reporter**: Generates natural language forensic reports from results
+
+*Source: [workflow.dot](docs/architecture/workflow.dot)*
+
 ## Usage
 
 ### Single Query

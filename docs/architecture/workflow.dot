@@ -1,0 +1,162 @@
+digraph Full_Workflow {
+  rankdir=TB;
+  labelloc="t";
+  label="";
+
+  // make cluster edge routing stable
+  compound=true;
+  newrank=true;
+
+  node [shape=box, style="rounded", fontsize=11];
+  edge [fontsize=10];
+
+  // =========================
+  // Main Workflow
+  // =========================
+
+    User   [shape=oval, label="User Request"];
+    Router [shape=diamond, label="Route"];
+
+    Dispatch [label=<
+      <b>Dispatch (code)</b><br align="left"/>
+      invoke subgraph <br align="left"/>
+      consume: subgraph.result <br align="left"/>
+      output: result <br align="left"/>
+    >];
+
+
+    Report [label=<
+      <b>Reporter (Agent)</b><br align="left"/>
+      input: subgraph result<br align="left"/>
+      output: natural-language answer <br align="left"/>
+    >];
+
+    Deliver [shape=oval, label="NL result"];
+    Report -> Deliver;
+
+    User -> Router;
+    Router -> Dispatch;
+
+  // =========================
+  // TT (Single) -- place RIGHT
+  // =========================
+  subgraph cluster_tt {
+    label="Subgraph: TraceTx (TT)\n(single-tx cross-chain trace)";
+    style="rounded,dashed";
+    color="gray50";
+
+    TT_Orch [label=<
+      <b>TT.Orch (Agent)</b><br align="left"/>
+      input: request<br align="left"/>
+      output: task_brief, action
+    >];
+
+    TT_Fetch [label=<
+      <b>TT.Fetcher (Agent)</b><br align="left"/>
+      tool: blockchain tools<br align="left"/>
+      input: task_brief<br align="left"/>
+      output: fetch_artifacts<br align="left"/>
+    >];
+
+    TT_Validate [label=<
+      <b>TT.Validate (code)</b><br align="left"/>
+      input: candidate_links<br align="left"/>
+    >];
+
+    TT_Score [label=<
+      <b>TT.Score (code)</b><br align="left"/>
+      input: candidate_links<br align="left"/>
+      output: ScoreTable<br align="left"/>
+    >];
+
+    // Control-flow inside TT
+    TT_Orch  -> TT_Fetch [label="fetch"];
+    TT_Fetch -> TT_Orch;
+    TT_Orch  -> TT_Validate [label="done"];
+    TT_Validate  -> TT_Score;
+  }
+
+  // =========================
+  // TG (Group) -- place LEFT
+  // =========================
+  subgraph cluster_tg {
+    label="Subgraph: TraceGroupTx (TG)\n(group-tx cross-chain trace)";
+    style="rounded,dashed";
+    color="gray50";
+
+    TG_Orch [label=<
+      <b>TG.Orch (Agent)</b><br align="left"/>
+      input: request<br align="left"/>
+      output: task <br align="left"/>
+    >];
+
+    TG_Crosschain [label=<
+      <b>TG.CrosschainTracer (code)</b><br align="left"/>
+      invokes TT × N <br align="left"/>
+      consumes: TT.result × N<br align="left"/>
+      output: dst_to_src_mapping <br align="left"/>
+    >];
+
+    TG_Samechain [label=<
+      <b>TG.SamechainTracer (code)</b><br align="left"/>
+      input: transfer<br align="left"/>
+      output: ancestors <br align="left"/>
+    >];
+
+    TG_Analyzer [label=<
+      <b>TG.Analyzer (Agent)</b><br align="left"/>
+      input: dst_to_src_mapping, ancestors <br align="left"/>
+      output: common_ancestor_results
+    >];
+    // Control-flow inside TG
+    TG_Orch  -> TG_Crosschain    [label="crosschain"];
+    TG_Orch   -> TG_Samechain [label="samechain"];
+    TG_Orch -> TG_Analyzer [label="analyze"];
+  }
+
+  // =========================
+  // Make TT and TG parallel + aligned height (stable)
+  // =========================
+  { rank=same; TG_Orch;  TT_Orch;  }
+//   { rank=same; TG_Analyzer; TT_Score; }
+
+  // force side-by-side without fragile dummy nodes
+  TG_Orch  -> TT_Orch  [style=invis, weight=100];
+//   TG_Analyzer -> TT_Score [style=invis, weight=100];
+
+
+  // =========================
+  // Dispatch control-flow
+  // =========================
+  Dispatch -> TT_Orch [label="TraceTx", lhead=cluster_tt];
+  Dispatch -> TG_Orch [label="TraceGroupTx", lhead=cluster_tg];
+
+  // =========================
+  // TG invokes TT (CONTROL-FLOW)
+  // =========================
+  TG_Crosschain -> TT_Orch [
+    label="invoke subgraph",
+    constraint=false,
+    // ltail=cluster_tg,
+    lhead=cluster_tt,
+    minlen=2
+  ];
+
+  // =========================
+  // TT returns to TG (DATAFLOW, not control)
+  // =========================
+  TT_Score -> TG_Crosschain [
+    style=dashed,
+    label="done",
+    constraint=false,
+    ltail=cluster_tt,
+    // lhead=cluster_tg,
+    minlen=2
+  ];
+
+  // =========================
+  // Both subgraphs go to shared report (CONTROL-FLOW)
+  // =========================
+  TT_Score -> Report [label="done"];
+  TG_Analyzer -> Report [label="done"];
+}

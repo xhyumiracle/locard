@@ -1,0 +1,244 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="768pt" height="770pt" viewBox="0.00 0.00 768.00 770.00">
+<g id="graph0" class="graph" transform="scale(1 1) rotate(0) translate(4 765.6)">
+<title>Full_Workflow</title>
+<polygon fill="white" stroke="none" points="-4,4 -4,-765.6 764.11,-765.6 764.11,4 -4,4"/>
+<g id="clust1" class="cluster">
+<title>cluster_tt</title>
+<path fill="none" stroke="#7f7f7f" stroke-dasharray="5,2" d="M20,-165C20,-165 290,-165 290,-165 296,-165 302,-171 302,-177 302,-177 302,-497.1 302,-497.1 302,-503.1 296,-509.1 290,-509.1 290,-509.1 20,-509.1 20,-509.1 14,-509.1 8,-503.1 8,-497.1 8,-497.1 8,-177 8,-177 8,-171 14,-165 20,-165"/>
+<text xml:space="preserve" text-anchor="middle" x="155" y="-492.5" font-family="Times,serif" font-size="14.00">Subgraph: TraceTx (TT)</text>
+<text xml:space="preserve" text-anchor="middle" x="155" y="-475.7" font-family="Times,serif" font-size="14.00">(single-tx cross-chain trace)</text>
+</g>
+<g id="clust2" class="cluster">
+<title>cluster_tg</title>
+<path fill="none" stroke="#7f7f7f" stroke-dasharray="5,2" d="M322,-235C322,-235 686,-235 686,-235 692,-235 698,-241 698,-247 698,-247 698,-502.6 698,-502.6 698,-508.6 692,-514.6 686,-514.6 686,-514.6 322,-514.6 322,-514.6 316,-514.6 310,-508.6 310,-502.6 310,-502.6 310,-247 310,-247 310,-241 316,-235 322,-235"/>
+<text xml:space="preserve" text-anchor="middle" x="504" y="-498" font-family="Times,serif" font-size="14.00">Subgraph: TraceGroupTx (TG)</text>
+<text xml:space="preserve" text-anchor="middle" x="504" y="-481.2" font-family="Times,serif" font-size="14.00">(group-tx cross-chain trace)</text>
+</g>
+<!-- User -->
+<g id="node1" class="node">
+<title>User</title>
+<ellipse fill="none" stroke="black" cx="301" cy="-743.6" rx="46.37" ry="18"/>
+<text xml:space="preserve" text-anchor="middle" x="301" y="-740.3" font-family="Times,serif" font-size="11.00">User Request</text>
+</g>
+<!-- Router -->
+<g id="node2" class="node">
+<title>Router</title>
+<path fill="none" stroke="black" d="M290.21,-683.35C290.21,-683.35 274.8,-675.85 274.8,-675.85 269.41,-673.23 269.41,-667.97 274.8,-665.35 274.8,-665.35 290.21,-657.85 290.21,-657.85 295.6,-655.23 306.4,-655.23 311.79,-657.85 311.79,-657.85 327.2,-665.35 327.2,-665.35 332.59,-667.97 332.59,-673.23 327.2,-675.85 327.2,-675.85 311.79,-683.35 311.79,-683.35 306.4,-685.97 295.6,-685.97 290.21,-683.35"/>
+<text xml:space="preserve" text-anchor="middle" x="301" y="-667.3" font-family="Times,serif" font-size="11.00">Route</text>
+</g>
+<!-- User&#45;&gt;Router -->
+<g id="edge2" class="edge">
+<title>User-&gt;Router</title>
+<path fill="none" stroke="black" d="M301,-725.41C301,-717.94 301,-708.97 301,-700.52"/>
+<polygon fill="black" stroke="black" points="304.5,-700.64 301,-690.64 297.5,-700.64 304.5,-700.64"/>
+</g>
+<!-- Dispatch -->
+<g id="node3" class="node">
+<title>Dispatch</title>
+<path fill="none" stroke="black" d="M362.84,-615.6C362.84,-615.6 239.16,-615.6 239.16,-615.6 233.16,-615.6 227.16,-609.6 227.16,-603.6 227.16,-603.6 227.16,-564.6 227.16,-564.6 227.16,-558.6 233.16,-552.6 239.16,-552.6 239.16,-552.6 362.84,-552.6 362.84,-552.6 368.84,-552.6 374.84,-558.6 374.84,-564.6 374.84,-564.6 374.84,-603.6 374.84,-603.6 374.84,-609.6 368.84,-615.6 362.84,-615.6"/>
+<text xml:space="preserve" text-anchor="start" x="235.16" y="-602.7" font-family="Times,serif" font-size="11.00">      </text>
+<text xml:space="preserve" text-anchor="start" x="251.66" y="-602.7" font-family="Times,serif" font-weight="bold" font-size="11.00">Dispatch (code)</text>
+<text xml:space="preserve" text-anchor="start" x="235.16" y="-591.7" font-family="Times,serif" font-size="11.00">      invoke subgraph </text>
+<text xml:space="preserve" text-anchor="start" x="235.16" y="-580.7" font-family="Times,serif" font-size="11.00">      consume: subgraph.result </text>
+<text xml:space="preserve" text-anchor="start" x="235.16" y="-569.7" font-family="Times,serif" font-size="11.00">      output: result </text>
+<text xml:space="preserve" text-anchor="start" x="295.5" y="-558.7" font-family="Times,serif" font-size="11.00">    </text>
+</g>
+<!-- Router&#45;&gt;Dispatch -->
+<g id="edge3" class="edge">
+<title>Router-&gt;Dispatch</title>
+<path fill="none" stroke="black" d="M301,-652.09C301,-644.83 301,-636.07 301,-627.3"/>
+<polygon fill="black" stroke="black" points="304.5,-627.43 301,-617.43 297.5,-627.43 304.5,-627.43"/>
+</g>
+<!-- TT_Orch -->
+<g id="node6" class="node">
+<title>TT_Orch</title>
+<path fill="none" stroke="black" d="M281.89,-459.5C281.89,-459.5 152.11,-459.5 152.11,-459.5 146.11,-459.5 140.11,-453.5 140.11,-447.5 140.11,-447.5 140.11,-430.5 140.11,-430.5 140.11,-424.5 146.11,-418.5 152.11,-418.5 152.11,-418.5 281.89,-418.5 281.89,-418.5 287.89,-418.5 293.89,-424.5 293.89,-430.5 293.89,-430.5 293.89,-447.5 293.89,-447.5 293.89,-453.5 287.89,-459.5 281.89,-459.5"/>
+<text xml:space="preserve" text-anchor="start" x="148.11" y="-446.6" font-family="Times,serif" font-size="11.00">      </text>
+<text xml:space="preserve" text-anchor="start" x="164.61" y="-446.6" font-family="Times,serif" font-weight="bold" font-size="11.00">TT.Orch (Agent)</text>
+<text xml:space="preserve" text-anchor="start" x="148.11" y="-435.6" font-family="Times,serif" font-size="11.00">      input: request</text>
+<text xml:space="preserve" text-anchor="start" x="148.11" y="-424.6" font-family="Times,serif" font-size="11.00">      output: task_brief, action    </text>
+</g>
+<!-- Dispatch&#45;&gt;TT_Orch -->
+<g id="edge12" class="edge">
+<title>Dispatch-&gt;TT_Orch</title>
+<path fill="none" stroke="black" d="M282.98,-552.4C277.07,-542.34 270.22,-530.66 263.2,-518.71"/>
+<polygon fill="black" stroke="black" points="266.41,-517.25 258.33,-510.4 260.37,-520.8 266.41,-517.25"/>
+<text xml:space="preserve" text-anchor="middle" x="288.36" y="-525.6" font-family="Times,serif" font-size="10.00">TraceTx</text>
+</g>
+<!-- TG_Orch -->
+<g id="node10" class="node">
+<title>TG_Orch</title>
+<path fill="none" stroke="black" d="M430.88,-465C430.88,-465 341.12,-465 341.12,-465 335.12,-465 329.12,-459 329.12,-453 329.12,-453 329.12,-425 329.12,-425 329.12,-419 335.12,-413 341.12,-413 341.12,-413 430.88,-413 430.88,-413 436.88,-413 442.88,-419 442.88,-425 442.88,-425 442.88,-453 442.88,-453 442.88,-459 436.88,-465 430.88,-465"/>
+<text xml:space="preserve" text-anchor="start" x="337.12" y="-452.1" font-family="Times,serif" font-size="11.00">      </text>
+<text xml:space="preserve" text-anchor="start" x="353.62" y="-452.1" font-family="Times,serif" font-weight="bold" font-size="11.00">TG.Orch (Agent)</text>
+<text xml:space="preserve" text-anchor="start" x="337.12" y="-441.1" font-family="Times,serif" font-size="11.00">      input: request</text>
+<text xml:space="preserve" text-anchor="start" x="337.12" y="-430.1" font-family="Times,serif" font-size="11.00">      output: task </text>
+<text xml:space="preserve" text-anchor="start" x="380.5" y="-419.1" font-family="Times,serif" font-size="11.00">    </text>
+</g>
+<!-- Dispatch&#45;&gt;TG_Orch -->
+<g id="edge13" class="edge">
+<title>Dispatch-&gt;TG_Orch</title>
+<path fill="none" stroke="black" d="M319.23,-552.4C324.28,-543.9 330.02,-534.25 335.95,-524.26"/>
+<polygon fill="black" stroke="black" points="338.82,-526.28 340.92,-515.9 332.8,-522.71 338.82,-526.28"/>
+<text xml:space="preserve" text-anchor="middle" x="365.59" y="-525.6" font-family="Times,serif" font-size="10.00">TraceGroupTx</text>
+</g>
+<!-- Report -->
+<g id="node4" class="node">
+<title>Report</title>
+<path fill="none" stroke="black" d="M378.49,-125C378.49,-125 225.51,-125 225.51,-125 219.51,-125 213.51,-119 213.51,-113 213.51,-113 213.51,-85 213.51,-85 213.51,-79 219.51,-73 225.51,-73 225.51,-73 378.49,-73 378.49,-73 384.49,-73 390.49,-79 390.49,-85 390.49,-85 390.49,-113 390.49,-113 390.49,-119 384.49,-125 378.49,-125"/>
+<text xml:space="preserve" text-anchor="start" x="221.51" y="-112.1" font-family="Times,serif" font-size="11.00">      </text>
+<text xml:space="preserve" text-anchor="start" x="238.01" y="-112.1" font-family="Times,serif" font-weight="bold" font-size="11.00">Reporter (Agent)</text>
+<text xml:space="preserve" text-anchor="start" x="221.51" y="-101.1" font-family="Times,serif" font-size="11.00">      input: subgraph result</text>
+<text xml:space="preserve" text-anchor="start" x="221.51" y="-90.1" font-family="Times,serif" font-size="11.00">      output: natural-language answer </text>
+<text xml:space="preserve" text-anchor="start" x="296.5" y="-79.1" font-family="Times,serif" font-size="11.00">    </text>
+</g>
+<!-- Deliver -->
+<g id="node5" class="node">
+<title>Deliver</title>
+<ellipse fill="none" stroke="black" cx="302" cy="-18" rx="35.79" ry="18"/>
+<text xml:space="preserve" text-anchor="middle" x="302" y="-14.7" font-family="Times,serif" font-size="11.00">NL result</text>
+</g>
+<!-- Report&#45;&gt;Deliver -->
+<g id="edge1" class="edge">
+<title>Report-&gt;Deliver</title>
+<path fill="none" stroke="black" d="M302,-72.57C302,-64.57 302,-55.68 302,-47.48"/>
+<polygon fill="black" stroke="black" points="305.5,-47.66 302,-37.66 298.5,-47.66 305.5,-47.66"/>
+</g>
+<!-- TT_Fetch -->
+<g id="node7" class="node">
+<title>TT_Fetch</title>
+<path fill="none" stroke="black" d="M133.66,-365C133.66,-365 28.34,-365 28.34,-365 22.34,-365 16.34,-359 16.34,-353 16.34,-353 16.34,-314 16.34,-314 16.34,-308 22.34,-302 28.34,-302 28.34,-302 133.66,-302 133.66,-302 139.66,-302 145.66,-308 145.66,-314 145.66,-314 145.66,-353 145.66,-353 145.66,-359 139.66,-365 133.66,-365"/>
+<text xml:space="preserve" text-anchor="start" x="24.34" y="-352.1" font-family="Times,serif" font-size="11.00">      </text>
+<text xml:space="preserve" text-anchor="start" x="40.84" y="-352.1" font-family="Times,serif" font-weight="bold" font-size="11.00">TT.Fetcher (Agent)</text>
+<text xml:space="preserve" text-anchor="start" x="24.34" y="-341.1" font-family="Times,serif" font-size="11.00">      tool: blockchain tools</text>
+<text xml:space="preserve" text-anchor="start" x="24.34" y="-330.1" font-family="Times,serif" font-size="11.00">      input: task_brief</text>
+<text xml:space="preserve" text-anchor="start" x="24.34" y="-319.1" font-family="Times,serif" font-size="11.00">      output: fetch_artifacts</text>
+<text xml:space="preserve" text-anchor="start" x="75.5" y="-308.1" font-family="Times,serif" font-size="11.00">    </text>
+</g>
+<!-- TT_Orch&#45;&gt;TT_Fetch -->
+<g id="edge4" class="edge">
+<title>TT_Orch-&gt;TT_Fetch</title>
+<path fill="none" stroke="black" d="M168.47,-418.12C155.64,-411.72 142.25,-403.93 131.01,-395 123.43,-388.96 116.19,-381.61 109.7,-374.14"/>
+<polygon fill="black" stroke="black" points="112.49,-372.01 103.41,-366.54 107.1,-376.48 112.49,-372.01"/>
+<text xml:space="preserve" text-anchor="middle" x="141.01" y="-386" font-family="Times,serif" font-size="10.00">fetch</text>
+</g>
+<!-- TT_Validate -->
+<g id="node8" class="node">
+<title>TT_Validate</title>
+<path fill="none" stroke="black" d="M281.98,-354C281.98,-354 176.02,-354 176.02,-354 170.02,-354 164.02,-348 164.02,-342 164.02,-342 164.02,-325 164.02,-325 164.02,-319 170.02,-313 176.02,-313 176.02,-313 281.98,-313 281.98,-313 287.98,-313 293.98,-319 293.98,-325 293.98,-325 293.98,-342 293.98,-342 293.98,-348 287.98,-354 281.98,-354"/>
+<text xml:space="preserve" text-anchor="start" x="172.02" y="-341.1" font-family="Times,serif" font-size="11.00">      </text>
+<text xml:space="preserve" text-anchor="start" x="188.52" y="-341.1" font-family="Times,serif" font-weight="bold" font-size="11.00">TT.Validate (code)</text>
+<text xml:space="preserve" text-anchor="start" x="172.02" y="-330.1" font-family="Times,serif" font-size="11.00">      input: candidate_links</text>
+<text xml:space="preserve" text-anchor="start" x="223.5" y="-319.1" font-family="Times,serif" font-size="11.00">    </text>
+</g>
+<!-- TT_Orch&#45;&gt;TT_Validate -->
+<g id="edge6" class="edge">
+<title>TT_Orch-&gt;TT_Validate</title>
+<path fill="none" stroke="black" d="M219.31,-418.04C221.04,-403.15 223.43,-382.53 225.41,-365.5"/>
+<polygon fill="black" stroke="black" points="228.84,-366.23 226.52,-355.9 221.89,-365.43 228.84,-366.23"/>
+<text xml:space="preserve" text-anchor="middle" x="233.08" y="-386" font-family="Times,serif" font-size="10.00">done</text>
+</g>
+<!-- TT_Fetch&#45;&gt;TT_Orch -->
+<g id="edge5" class="edge">
+<title>TT_Fetch-&gt;TT_Orch</title>
+<path fill="none" stroke="black" d="M126.98,-365.49C135.07,-371.19 143.35,-377.18 151,-383 162.5,-391.75 174.75,-401.75 185.53,-410.81"/>
+<polygon fill="black" stroke="black" points="183.15,-413.37 193.04,-417.16 187.67,-408.03 183.15,-413.37"/>
+</g>
+<!-- TT_Score -->
+<g id="node9" class="node">
+<title>TT_Score</title>
+<path fill="none" stroke="black" d="M281.98,-225C281.98,-225 176.02,-225 176.02,-225 170.02,-225 164.02,-219 164.02,-213 164.02,-213 164.02,-185 164.02,-185 164.02,-179 170.02,-173 176.02,-173 176.02,-173 281.98,-173 281.98,-173 287.98,-173 293.98,-179 293.98,-185 293.98,-185 293.98,-213 293.98,-213 293.98,-219 287.98,-225 281.98,-225"/>
+<text xml:space="preserve" text-anchor="start" x="172.02" y="-212.1" font-family="Times,serif" font-size="11.00">      </text>
+<text xml:space="preserve" text-anchor="start" x="188.52" y="-212.1" font-family="Times,serif" font-weight="bold" font-size="11.00">TT.Score (code)</text>
+<text xml:space="preserve" text-anchor="start" x="172.02" y="-201.1" font-family="Times,serif" font-size="11.00">      input: candidate_links</text>
+<text xml:space="preserve" text-anchor="start" x="172.02" y="-190.1" font-family="Times,serif" font-size="11.00">      output: ScoreTable</text>
+<text xml:space="preserve" text-anchor="start" x="223.5" y="-179.1" font-family="Times,serif" font-size="11.00">    </text>
+</g>
+<!-- TT_Validate&#45;&gt;TT_Score -->
+<g id="edge7" class="edge">
+<title>TT_Validate-&gt;TT_Score</title>
+<path fill="none" stroke="black" d="M229,-312.66C229,-292.69 229,-261.39 229,-236.85"/>
+<polygon fill="black" stroke="black" points="232.5,-236.94 229,-226.94 225.5,-236.94 232.5,-236.94"/>
+</g>
+<!-- TT_Score&#45;&gt;Report -->
+<g id="edge16" class="edge">
+<title>TT_Score-&gt;Report</title>
+<path fill="none" stroke="black" d="M247.99,-172.51C256.61,-160.94 266.93,-147.08 276.24,-134.59"/>
+<polygon fill="black" stroke="black" points="279.03,-136.69 282.2,-126.58 273.42,-132.51 279.03,-136.69"/>
+<text xml:space="preserve" text-anchor="middle" x="279.59" y="-146" font-family="Times,serif" font-size="10.00">done</text>
+</g>
+<!-- TG_Crosschain -->
+<g id="node11" class="node">
+<title>TG_Crosschain</title>
+<path fill="none" stroke="black" d="M473.76,-365C473.76,-365 330.24,-365 330.24,-365 324.24,-365 318.24,-359 318.24,-353 318.24,-353 318.24,-314 318.24,-314 318.24,-308 324.24,-302 330.24,-302 330.24,-302 473.76,-302 473.76,-302 479.76,-302 485.76,-308 485.76,-314 485.76,-314 485.76,-353 485.76,-353 485.76,-359 479.76,-365 473.76,-365"/>
+<text xml:space="preserve" text-anchor="start" x="326.24" y="-352.1" font-family="Times,serif" font-size="11.00">      </text>
+<text xml:space="preserve" text-anchor="start" x="342.74" y="-352.1" font-family="Times,serif" font-weight="bold" font-size="11.00">TG.CrosschainTracer (code)</text>
+<text xml:space="preserve" text-anchor="start" x="326.24" y="-341.1" font-family="Times,serif" font-size="11.00">      invokes TT × N </text>
+<text xml:space="preserve" text-anchor="start" x="326.24" y="-330.1" font-family="Times,serif" font-size="11.00">      consumes: TT.result × N</text>
+<text xml:space="preserve" text-anchor="start" x="326.24" y="-319.1" font-family="Times,serif" font-size="11.00">      output: dst_to_src_mapping </text>
+<text xml:space="preserve" text-anchor="start" x="396.5" y="-308.1" font-family="Times,serif" font-size="11.00">    </text>
+</g>
+<!-- TT_Score&#45;&gt;TG_Crosschain -->
+<g id="edge15" class="edge">
+<title>TT_Score-&gt;TG_Crosschain</title>
+<path fill="none" stroke="black" stroke-dasharray="5,2" d="M302,-216.85C318.37,-220.07 335.71,-223.04 352,-225 365.97,-226.68 595.25,-224.86 605,-235 620.09,-250.7 619.1,-267.4 605,-284 590.59,-300.96 532.71,-297.23 497.29,-302.19"/>
+<polygon fill="black" stroke="black" points="496.91,-298.7 487.72,-303.97 498.19,-305.58 496.91,-298.7"/>
+<text xml:space="preserve" text-anchor="middle" x="625.67" y="-260.5" font-family="Times,serif" font-size="10.00">done</text>
+</g>
+<!-- TG_Orch&#45;&gt;TT_Orch -->
+<!-- TG_Orch&#45;&gt;TG_Crosschain -->
+<g id="edge8" class="edge">
+<title>TG_Orch-&gt;TG_Crosschain</title>
+<path fill="none" stroke="black" d="M389.91,-412.68C391.58,-401.89 393.58,-389 395.46,-376.83"/>
+<polygon fill="black" stroke="black" points="398.91,-377.38 396.98,-366.96 391.99,-376.31 398.91,-377.38"/>
+<text xml:space="preserve" text-anchor="middle" x="415.58" y="-386" font-family="Times,serif" font-size="10.00">crosschain</text>
+</g>
+<!-- TG_Samechain -->
+<g id="node12" class="node">
+<title>TG_Samechain</title>
+<path fill="none" stroke="black" d="M658.15,-359.5C658.15,-359.5 515.85,-359.5 515.85,-359.5 509.85,-359.5 503.85,-353.5 503.85,-347.5 503.85,-347.5 503.85,-319.5 503.85,-319.5 503.85,-313.5 509.85,-307.5 515.85,-307.5 515.85,-307.5 658.15,-307.5 658.15,-307.5 664.15,-307.5 670.15,-313.5 670.15,-319.5 670.15,-319.5 670.15,-347.5 670.15,-347.5 670.15,-353.5 664.15,-359.5 658.15,-359.5"/>
+<text xml:space="preserve" text-anchor="start" x="511.85" y="-346.6" font-family="Times,serif" font-size="11.00">      </text>
+<text xml:space="preserve" text-anchor="start" x="528.35" y="-346.6" font-family="Times,serif" font-weight="bold" font-size="11.00">TG.SamechainTracer (code)</text>
+<text xml:space="preserve" text-anchor="start" x="511.85" y="-335.6" font-family="Times,serif" font-size="11.00">      input: transfer</text>
+<text xml:space="preserve" text-anchor="start" x="511.85" y="-324.6" font-family="Times,serif" font-size="11.00">      output: ancestors </text>
+<text xml:space="preserve" text-anchor="start" x="581.5" y="-313.6" font-family="Times,serif" font-size="11.00">    </text>
+</g>
+<!-- TG_Orch&#45;&gt;TG_Samechain -->
+<g id="edge9" class="edge">
+<title>TG_Orch-&gt;TG_Samechain</title>
+<path fill="none" stroke="black" d="M435.43,-412.55C463.29,-398.2 498.3,-380.18 527.64,-365.07"/>
+<polygon fill="black" stroke="black" points="529.13,-368.24 536.42,-360.55 525.93,-362.01 529.13,-368.24"/>
+<text xml:space="preserve" text-anchor="middle" x="513.63" y="-386" font-family="Times,serif" font-size="10.00">samechain</text>
+</g>
+<!-- TG_Analyzer -->
+<g id="node13" class="node">
+<title>TG_Analyzer</title>
+<path fill="none" stroke="black" d="M591.66,-284C591.66,-284 416.34,-284 416.34,-284 410.34,-284 404.34,-278 404.34,-272 404.34,-272 404.34,-255 404.34,-255 404.34,-249 410.34,-243 416.34,-243 416.34,-243 591.66,-243 591.66,-243 597.66,-243 603.66,-249 603.66,-255 603.66,-255 603.66,-272 603.66,-272 603.66,-278 597.66,-284 591.66,-284"/>
+<text xml:space="preserve" text-anchor="start" x="412.34" y="-271.1" font-family="Times,serif" font-size="11.00">      </text>
+<text xml:space="preserve" text-anchor="start" x="428.84" y="-271.1" font-family="Times,serif" font-weight="bold" font-size="11.00">TG.Analyzer (Agent)</text>
+<text xml:space="preserve" text-anchor="start" x="412.34" y="-260.1" font-family="Times,serif" font-size="11.00">      input: dst_to_src_mapping, ancestors </text>
+<text xml:space="preserve" text-anchor="start" x="415.86" y="-249.1" font-family="Times,serif" font-size="11.00">      output: common_ancestor_results    </text>
+</g>
+<!-- TG_Orch&#45;&gt;TG_Analyzer -->
+<g id="edge10" class="edge">
+<title>TG_Orch-&gt;TG_Analyzer</title>
+<path fill="none" stroke="black" d="M443.35,-432C520.21,-422.64 650.31,-401.71 679,-365 696.24,-342.94 696.6,-323.77 679,-302 676.5,-298.91 647.99,-292.29 614.68,-285.46"/>
+<polygon fill="black" stroke="black" points="615.71,-282.09 605.21,-283.54 614.32,-288.95 615.71,-282.09"/>
+<text xml:space="preserve" text-anchor="middle" x="668.88" y="-386" font-family="Times,serif" font-size="10.00">analyze</text>
+</g>
+<!-- TG_Crosschain&#45;&gt;TT_Orch -->
+<g id="edge14" class="edge">
+<title>TG_Crosschain-&gt;TT_Orch</title>
+<path fill="none" stroke="black" d="M486.17,-363.02C489.14,-363.73 492.09,-364.4 495,-365 537.83,-373.87 661.52,-350.69 691,-383 694.59,-386.94 694.68,-391.14 691,-395 677.34,-409.31 378.38,-409.63 313.09,-412.82"/>
+<polygon fill="black" stroke="black" points="313.2,-409.3 303.5,-413.56 313.74,-416.28 313.2,-409.3"/>
+<text xml:space="preserve" text-anchor="middle" x="726.92" y="-386" font-family="Times,serif" font-size="10.00">invoke subgraph</text>
+</g>
+<!-- TG_Analyzer&#45;&gt;Report -->
+<g id="edge17" class="edge">
+<title>TG_Analyzer-&gt;Report</title>
+<path fill="none" stroke="black" d="M479.23,-242.57C445.15,-215.15 383.37,-165.46 342.51,-132.59"/>
+<polygon fill="black" stroke="black" points="344.78,-129.92 334.8,-126.38 340.4,-135.38 344.78,-129.92"/>
+<text xml:space="preserve" text-anchor="middle" x="466.4" y="-196" font-family="Times,serif" font-size="10.00">done</text>
+</g>
+</g>
+</svg>
