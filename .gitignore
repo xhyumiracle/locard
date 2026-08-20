@@ -19,6 +19,6 @@ wheels/
 .local/
 .important
 data/analysis
-*.ndjson
+*.jsonl
 *.json
 *.log

@@ -10,7 +10,7 @@
 > *"Every contact leaves a trace."* — Edmond Locard
 
 
-📄 **Paper**: *LOCARD: An Agentic Framework for Blockchain Forensics* [Under review]
+📄 **Paper**: *LOCARD: An Agentic Framework for Blockchain Forensics*, IEEE ICBC 2026, Brisbane, Australia, June 1-5, 2026. [DOI](https://doi.org/10.1109/ICBC67748.2026.11575479)
 
 ## Installation
 
@@ -142,7 +142,7 @@ uv run pytest tests/test_workflow_*.py   # Workflow tests
 ## Benchmark
 
 For evaluation, you can:
-- Use [ThorChain-2025 dataset](data/thorchain/README.md) (benchmark dataset used in the paper)
+- Use the [Thor25 dataset](https://huggingface.co/datasets/xhyumiracle/thor25) (benchmark dataset used in the paper)
 - Use the [benchmark pipeline](benchmark/README.md) (benchmark framework)
 
 ### Reproduce Paper Results
@@ -150,13 +150,13 @@ For evaluation, you can:
 Quick start with ThorChain-2025 dataset:
 
 ```bash
-# 1. Download dataset
+# 1. Download dataset submodule, or use the Hugging Face dataset page
 git submodule update --init data/thorchain
 
 # 2. Generate queries
 uv run python data/thorchain/script/process/gen_query.py \
   --batch \
-  --input-dir data/thorchain-2025-high-fast-mini \
+  --input-dir data/thorchain/data/thorchain-2025-high-fast-mini \
   --output-dir data/thorchain/queries/thorchain-2025-high-fast-mini
 
 # 3. Run benchmark
